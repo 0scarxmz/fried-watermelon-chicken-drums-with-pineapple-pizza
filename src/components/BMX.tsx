@@ -11,6 +11,7 @@ export default function BMX() {
     const bikeRef = useRef<RapierRigidBody>(null!);
     const modelRef = useRef<THREE.Group>(null!);
     const wheelAngle = useRef(0);
+    const steeringAngle = useRef(0);
 
     const [, getKeys] = useKeyboardControls();
 
@@ -67,6 +68,13 @@ export default function BMX() {
             );
         }
 
+        // --- VISUAL: Steering ---
+        // Smoothly interpolate steering angle for the front wheel.
+        // Positive left, negative right. Maximum angle ~45 degrees (0.8 rad)
+        steeringAngle.current = THREE.MathUtils.lerp(
+            steeringAngle.current, steerAmount * 0.8, 10 * delta
+        );
+
         // --- VISUAL: Lean into turns ---
         if (modelRef.current) {
             const targetLean = steerAmount * -0.15 * turnMultiplier;
@@ -112,9 +120,10 @@ export default function BMX() {
             <group ref={modelRef}>
                 <BikeModel
                     wheelAngleRef={wheelAngle}
+                    steeringAngleRef={steeringAngle}
                     scale={1.5}
                     rotation={[0, -Math.PI / 2, 0]}
-                    position={[0, 2.7, 0]}
+                    position={[0, 3.2, 0]}
                 />
             </group>
         </RigidBody>
