@@ -25,15 +25,18 @@ export default function Home() {
   return (
     <KeyboardControls map={map}>
       <Canvas shadows camera={{ position: [0, 5, 10], fov: 50 }}>
-        <Sky sunPosition={[100, 20, 100]} />
-        <ambientLight intensity={0.5} />
+        <Sky sunPosition={[100, 100, 100]} />
+        <ambientLight intensity={1.2} />
+        <hemisphereLight
+          args={["#87ceeb", "#362d1b", 0.8]}
+        />
         <directionalLight
           castShadow
-          position={[10, 10, 10]}
-          intensity={1.5}
-          shadow-mapSize={[1024, 1024]}
+          position={[50, 50, 25]}
+          intensity={2.5}
+          shadow-mapSize={[2048, 2048]}
         />
-        <Physics debug>
+        <Physics>
           <Ground />
           <BMX />
         </Physics>

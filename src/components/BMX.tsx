@@ -1,158 +1,122 @@
 "use client";
 
+import React, { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useKeyboardControls } from "@react-three/drei";
-import { RigidBody, RapierRigidBody, useRevoluteJoint } from "@react-three/rapier";
-import { useRef, useState, useEffect } from "react";
+import { RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
 import * as THREE from "three";
+import { BikeModel } from "./BikeModel";
 
 export default function BMX() {
-    const frameRef = useRef<RapierRigidBody>(null!);
-    const frontWheelRef = useRef<RapierRigidBody>(null!);
-    const backWheelRef = useRef<RapierRigidBody>(null!);
-    // Optional: fork to allow steering rotation independent of frame
-    const forkRef = useRef<RapierRigidBody>(null!);
+    const bikeRef = useRef<RapierRigidBody>(null!);
+    const modelRef = useRef<THREE.Group>(null!);
+    const wheelAngle = useRef(0);
 
     const [, getKeys] = useKeyboardControls();
 
-    // Camera tracking
-    const cameraTarget = new THREE.Vector3();
-    const cameraPosition = new THREE.Vector3();
-
-    // Joint setup needs refs to be attached first, so we use optional joint hooks
-    // Back wheel to frame (drive wheel) - Revolute joint (hinge)
-    const backJoint = useRevoluteJoint(frameRef, backWheelRef, [
-        [-0.5, -0.5, 0], // position of joint on frame
-        [0, 0, 0],       // position of joint on wheel
-        [0, 0, 1]        // axis of rotation (z-axis for rolling)
-    ]);
-
-    // Front wheel to fork - Revolute joint
-    const frontJoint = useRevoluteJoint(forkRef, frontWheelRef, [
-        [0, -0.5, 0],    // position of joint on fork
-        [0, 0, 0],       // position of joint on wheel
-        [0, 0, 1]        // axis of rotation (z-axis for rolling)
-    ]);
-
-    // Fork to frame - Revolute joint (steering), rotating around Y axis
-    const steeringJoint = useRevoluteJoint(frameRef, forkRef, [
-        [0.5, -0.2, 0],    // position of joint on frame
-        [0, 0.3, 0],       // position of joint on fork
-        [0, 1, 0]          // axis of rotation (y-axis for steering)
-    ]);
-
-    // Configure limits for steering
-    useEffect(() => {
-        if (steeringJoint.current) {
-            // Limit steering angle to roughly +/- 45 degrees (in radians)
-            steeringJoint.current.setLimits(-Math.PI / 4, Math.PI / 4);
-        }
-    }, [steeringJoint]);
+    // Stable refs for enabledRotations
+    const enabledRotations = useMemo(
+        () => [false, true, false] as [boolean, boolean, boolean],
+        []
+    );
 
     useFrame((state, delta) => {
-        if (!frameRef.current || !backWheelRef.current || !forkRef.current || !frontWheelRef.current) return;
+        if (!bikeRef.current) return;
 
         const { forward, backward, left, right } = getKeys();
 
-        // Reset forces
-        if (backJoint.current) {
-            backJoint.current.configureMotorVelocity(0, 10);
+        const linvel = bikeRef.current.linvel();
+        const velocity = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
+
+        // Get bike's current rotation
+        const rotation = bikeRef.current.rotation();
+        const quaternion = new THREE.Quaternion(
+            rotation.x, rotation.y, rotation.z, rotation.w
+        );
+
+        // +Z is forward
+        const forwardDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion);
+        const upDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
+
+        // --- MOVEMENT ---
+        const engineForce = 8.0;
+        if (forward) {
+            bikeRef.current.applyImpulse(
+                forwardDirection.clone().multiplyScalar(engineForce), true
+            );
+        }
+        if (backward) {
+            bikeRef.current.applyImpulse(
+                forwardDirection.clone().multiplyScalar(-engineForce * 0.6), true
+            );
         }
 
-        // Motor control (rear wheel)
-        const speed = 20; // rad/s
-        if (forward && backJoint.current) {
-            // Rotate "forward" around Z axis (negative speed depending on orientation)
-            backJoint.current.configureMotorVelocity(-speed, 100);
-        } else if (backward && backJoint.current) {
-            backJoint.current.configureMotorVelocity(speed, 100);
+        // --- STEERING ---
+        const speed = velocity.length();
+        const forwardDot = forwardDirection.dot(velocity);
+        const turnMultiplier = Math.min(speed / 3, 1) * (forwardDot < 0 ? -1 : 1);
+
+        let steerAmount = 0;
+        if (left) steerAmount = 1;
+        if (right) steerAmount = -1;
+
+        if (steerAmount !== 0) {
+            const steeringImpulse = steerAmount * turnMultiplier * delta * 80;
+            bikeRef.current.applyTorqueImpulse(
+                upDirection.clone().multiplyScalar(steeringImpulse), true
+            );
         }
 
-        // Steering control
-        const steerAngle = Math.PI / 4; // Max steering angle
-        if (steeringJoint.current) {
-            if (left) {
-                steeringJoint.current.configureMotorPosition(steerAngle, 100, 10);
-            } else if (right) {
-                steeringJoint.current.configureMotorPosition(-steerAngle, 100, 10);
-            } else {
-                // Return to center
-                steeringJoint.current.configureMotorPosition(0, 100, 10);
-            }
+        // --- VISUAL: Lean into turns ---
+        if (modelRef.current) {
+            const targetLean = steerAmount * -0.15 * turnMultiplier;
+            modelRef.current.rotation.z = THREE.MathUtils.lerp(
+                modelRef.current.rotation.z, targetLean, 8 * delta
+            );
         }
 
-        // Camera Follow
-        const translation = frameRef.current.translation();
-        const pos = new THREE.Vector3(translation.x, translation.y, translation.z);
+        // --- VISUAL: Calculate Wheel Spin ---
+        const wheelRadius = 0.55;
+        // Negative sign to make wheels spin forward (since +Z is out of the screen, right hand rule on Z axis makes +angle spin backward relative to wheel coordinates? Let's fix if needed)
+        // Bike is rotated -90 deg on Y, so its Z is pointing right locally.
+        // Actually, let's keep it simple: speed / radius. We can flip sign if it rolls backwards.
+        wheelAngle.current += (forwardDot / wheelRadius) * delta;
 
-        // Get the frame's rotation to place camera behind it
-        const rotation = frameRef.current.rotation();
-        const quaternion = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+        // --- CAMERA ---
+        const pos = bikeRef.current.translation();
+        const bikePos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-        // Forward vector of the bike
-        const forwardDirection = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+        const idealOffset = forwardDirection.clone().multiplyScalar(-8).add(new THREE.Vector3(0, 5, 0));
+        const cameraTarget = bikePos.clone().add(new THREE.Vector3(0, 1.5, 0));
 
-        // Calculate ideal offset (behind and above)
-        // We go opposite of forward direction
-        const idealOffset = forwardDirection.clone().multiplyScalar(-5).add(new THREE.Vector3(0, 3, 0));
-
-        cameraPosition.copy(pos).add(idealOffset);
-        state.camera.position.lerp(cameraPosition, 5 * delta);
-
-        // Look slightly ahead of the bike
-        cameraTarget.copy(pos).add(new THREE.Vector3(0, 1, 0));
+        state.camera.position.lerp(bikePos.clone().add(idealOffset), 4 * delta);
         state.camera.lookAt(cameraTarget);
     });
 
     return (
-        <group position={[0, 2, 0]}>
-            {/* Frame */}
-            <RigidBody ref={frameRef} colliders="cuboid" mass={10} position={[0, 0, 0]}>
-                <mesh castShadow>
-                    {/* Main frame box */}
-                    <boxGeometry args={[1.5, 0.2, 0.2]} />
-                    <meshStandardMaterial color="red" />
-                </mesh>
-                <mesh castShadow position={[0.5, 0.2, 0]}>
-                    {/* Handlebar stem area */}
-                    <boxGeometry args={[0.2, 0.4, 0.2]} />
-                    <meshStandardMaterial color="red" />
-                </mesh>
-                <mesh castShadow position={[-0.5, -0.25, 0]}>
-                    {/* Seat tube area */}
-                    <boxGeometry args={[0.2, 0.5, 0.2]} />
-                    <meshStandardMaterial color="red" />
-                </mesh>
-            </RigidBody>
+        <RigidBody
+            ref={bikeRef}
+            colliders={false}
+            enabledRotations={enabledRotations}
+            mass={20}
+            position={[0, 3, 0]}
+            friction={1}
+            restitution={0.1}
+            linearDamping={1.5}
+            angularDamping={3}
+        >
+            {/* Collider: bottom at y=0, top at y=1.8 */}
+            <CuboidCollider args={[0.5, 0.9, 1.2]} position={[0, 0.9, 0]} />
 
-            {/* Fork */}
-            <RigidBody ref={forkRef} colliders="cuboid" mass={2} position={[0.5, -0.2, 0]}>
-                <mesh castShadow position={[0, -0.15, 0]}>
-                    <boxGeometry args={[0.1, 0.6, 0.1]} />
-                    <meshStandardMaterial color="silver" />
-                </mesh>
-                <mesh castShadow position={[0, 0.3, 0]}>
-                    {/* Handlebars */}
-                    <boxGeometry args={[0.1, 0.1, 0.8]} />
-                    <meshStandardMaterial color="black" />
-                </mesh>
-            </RigidBody>
-
-            {/* Front Wheel */}
-            <RigidBody ref={frontWheelRef} colliders="hull" mass={3} position={[0.5, -0.7, 0]} rotation={[Math.PI / 2, 0, 0]} friction={2}>
-                <mesh castShadow>
-                    <cylinderGeometry args={[0.4, 0.4, 0.1, 32]} />
-                    <meshStandardMaterial color="#111" />
-                </mesh>
-            </RigidBody>
-
-            {/* Back Wheel */}
-            <RigidBody ref={backWheelRef} colliders="hull" mass={4} position={[-0.5, -0.5, 0]} rotation={[Math.PI / 2, 0, 0]} friction={2}>
-                <mesh castShadow>
-                    <cylinderGeometry args={[0.4, 0.4, 0.1, 32]} />
-                    <meshStandardMaterial color="#111" />
-                </mesh>
-            </RigidBody>
-        </group>
+            {/* 3D model rotated to face +Z forward, raised so wheels sit on ground */}
+            <group ref={modelRef}>
+                <BikeModel
+                    wheelAngleRef={wheelAngle}
+                    scale={1.5}
+                    rotation={[0, -Math.PI / 2, 0]}
+                    position={[0, 2.7, 0]}
+                />
+            </group>
+        </RigidBody>
     );
 }
