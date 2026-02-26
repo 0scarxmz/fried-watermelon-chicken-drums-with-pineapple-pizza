@@ -62,7 +62,8 @@ export default function BMX() {
         if (right) steerAmount = -1;
 
         if (steerAmount !== 0) {
-            const steeringImpulse = steerAmount * turnMultiplier * delta * 80;
+            // Adjusted steering impulse to be balanced for the platform
+            const steeringImpulse = steerAmount * turnMultiplier * delta * 160;
             bikeRef.current.applyTorqueImpulse(
                 upDirection.clone().multiplyScalar(steeringImpulse), true
             );
