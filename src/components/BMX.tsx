@@ -12,6 +12,8 @@ export default function BMX() {
     const modelRef = useRef<THREE.Group>(null!);
     const wheelAngle = useRef(0);
     const steeringAngle = useRef(0);
+    const smoothedCameraPosition = useRef(new THREE.Vector3(0, 5, -10));
+    const smoothedCameraTarget = useRef(new THREE.Vector3());
 
     const [, getKeys] = useKeyboardControls();
 
@@ -95,11 +97,16 @@ export default function BMX() {
         const pos = bikeRef.current.translation();
         const bikePos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-        const idealOffset = forwardDirection.clone().multiplyScalar(-8).add(new THREE.Vector3(0, 5, 0));
-        const cameraTarget = bikePos.clone().add(new THREE.Vector3(0, 1.5, 0));
+        const idealPosition = bikePos.clone().add(
+            forwardDirection.clone().multiplyScalar(-8).add(new THREE.Vector3(0, 5, 0))
+        );
+        const idealTarget = bikePos.clone().add(new THREE.Vector3(0, 1.5, 0));
 
-        state.camera.position.lerp(bikePos.clone().add(idealOffset), 4 * delta);
-        state.camera.lookAt(cameraTarget);
+        smoothedCameraPosition.current.lerp(idealPosition, 5 * delta);
+        smoothedCameraTarget.current.lerp(idealTarget, 15 * delta);
+
+        state.camera.position.copy(smoothedCameraPosition.current);
+        state.camera.lookAt(smoothedCameraTarget.current);
     });
 
     return (
@@ -109,7 +116,7 @@ export default function BMX() {
             enabledRotations={enabledRotations}
             mass={20}
             position={[0, 3, 0]}
-            friction={1}
+            friction={0}
             restitution={0.1}
             linearDamping={1.5}
             angularDamping={3}

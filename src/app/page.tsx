@@ -12,6 +12,7 @@ enum Controls {
   backward = "backward",
   left = "left",
   right = "right",
+  jump = "jump",
 }
 
 export default function Home() {
@@ -20,6 +21,7 @@ export default function Home() {
     { name: Controls.backward, keys: ["ArrowDown", "s", "S"] },
     { name: Controls.left, keys: ["ArrowLeft", "a", "A"] },
     { name: Controls.right, keys: ["ArrowRight", "d", "D"] },
+    { name: Controls.jump, keys: ["Space"] },
   ], []);
 
   return (
