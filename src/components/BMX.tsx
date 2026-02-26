@@ -15,7 +15,7 @@ export default function BMX() {
     const steeringAngle = useRef(0);
     const jumpCharge = useRef(0);
     const wasJumping = useRef(false);
-    const smoothedCameraPosition = useRef(new THREE.Vector3(0, 5, -10));
+    const smoothedCameraPosition = useRef(new THREE.Vector3(0, 25, 15));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
 
     const [, getKeys] = useKeyboardControls();
@@ -149,10 +149,14 @@ export default function BMX() {
         // --- CAMERA ---
         const bikePos = new THREE.Vector3(pos.x, pos.y, pos.z);
 
-        const idealPosition = bikePos.clone().add(
-            forwardDirection.clone().multiplyScalar(-8).add(new THREE.Vector3(0, 5, 0))
+        // High helicopter chase camera: pulls back and up, rotating with the bike
+        const idealOffset = forwardDirection.clone().multiplyScalar(-18).add(new THREE.Vector3(0, 15, 0));
+        const idealPosition = bikePos.clone().add(idealOffset);
+        
+        // Look ahead of the bike so the player can see what's in front of them
+        const idealTarget = bikePos.clone().add(
+            forwardDirection.clone().multiplyScalar(10)
         );
-        const idealTarget = bikePos.clone().add(new THREE.Vector3(0, 1.5, 0));
 
         smoothedCameraPosition.current.lerp(idealPosition, 5 * delta);
         smoothedCameraTarget.current.lerp(idealTarget, 15 * delta);

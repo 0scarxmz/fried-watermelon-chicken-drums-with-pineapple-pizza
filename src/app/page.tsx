@@ -26,7 +26,7 @@ export default function Home() {
 
   return (
     <KeyboardControls map={map}>
-      <Canvas shadows camera={{ position: [0, 5, 10], fov: 50 }}>
+      <Canvas shadows camera={{ position: [0, 15, -18], fov: 65 }}>
         <Sky sunPosition={[100, 100, 100]} />
         <ambientLight intensity={1.2} />
         <hemisphereLight
