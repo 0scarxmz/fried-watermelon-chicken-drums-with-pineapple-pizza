@@ -2,8 +2,8 @@
 
 import { useFrame } from "@react-three/fiber";
 import { useKeyboardControls, useGLTF } from "@react-three/drei";
-import { RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
-import { useRef, useEffect } from "react";
+import { RigidBody, RapierRigidBody, CuboidCollider, BallCollider } from "@react-three/rapier";
+import { useRef, useMemo } from "react";
 import * as THREE from "three";
 
 export default function Player() {
@@ -16,20 +16,16 @@ export default function Player() {
     const [, getKeys] = useKeyboardControls();
     const { nodes, materials } = useGLTF("/models/bike.gltf") as any;
 
-    // Log missing nodes if necessary
-    useEffect(() => {
-        const requiredNodes = ["Bike", "Cylinder011", "Cylinder004", "Torus002", "Torus003"];
-        requiredNodes.forEach(nodeName => {
-            if (!nodes[nodeName]) {
-                console.warn(`Missing GLTF node: ${nodeName}`);
-            }
-        });
-    }, [nodes]);
-
     const playerPosition = new THREE.Vector3();
     const cameraTarget = new THREE.Vector3();
     const cameraPosition = new THREE.Vector3();
     const currentWheelRotation = useRef(0);
+    const steeringAngle = useRef(0);
+
+    const enabledRotations = useMemo(() => [true, true, false] as [boolean, boolean, boolean], []);
+    
+    // The fork/handlebars pivot axis from BikeModel.tsx
+    const steeringAxis = useMemo(() => new THREE.Vector3(-0.591, 1.528, 0).normalize(), []);
 
     useFrame((state, delta) => {
         if (!rigidBodyRef.current) return;
@@ -44,72 +40,82 @@ export default function Player() {
         // Get bike's current orientation
         const rotation = rigidBodyRef.current.rotation();
         const quaternion = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-        const forwardDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion);
+        
+        // Face +Z
+        const forwardDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion);
+        const upDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
+        const forwardDot = forwardDirection.dot(velocity);
 
         // Apply impulses
-        const impulseStrength = 2.0;
+        const impulseStrength = 20.0;
         if (forward) {
             rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(impulseStrength), true);
         }
         if (backward) {
-            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-impulseStrength), true);
+            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-impulseStrength * 0.6), true);
         }
 
         // Apply torque for turning the physics body
-        const turnStrength = 5.0;
-        if (left) {
-            rigidBodyRef.current.applyTorqueImpulse({ x: 0, y: turnStrength, z: 0 }, true);
-        }
-        if (right) {
-            rigidBodyRef.current.applyTorqueImpulse({ x: 0, y: -turnStrength, z: 0 }, true);
-        }
+        const turnMultiplier = Math.min(speed / 3, 1) * (forwardDot < 0 ? -1 : 1);
+        let steerAmount = 0;
+        if (left) steerAmount = 1;
+        if (right) steerAmount = -1;
 
-        // 2. Visual Steering (lerp frontAssemblyRef.current.rotation.y up to 35 degrees)
-        if (frontAssemblyRef.current) {
-            // Positive Y rotation to turn left when facing -Z
-            const targetSteer = left ? 0.61 : right ? -0.61 : 0; 
-            frontAssemblyRef.current.rotation.y = THREE.MathUtils.lerp(
-                frontAssemblyRef.current.rotation.y,
-                targetSteer,
-                10 * delta
+        if (steerAmount !== 0) {
+            const steeringImpulse = steerAmount * turnMultiplier * delta * 50;
+            rigidBodyRef.current.applyTorqueImpulse(
+                upDirection.clone().multiplyScalar(steeringImpulse), true
             );
         }
 
+        // 2. Visual Steering (Lerp custom angled axis)
+        steeringAngle.current = THREE.MathUtils.lerp(
+            steeringAngle.current,
+            steerAmount * 0.8,
+            10 * delta
+        );
+
+        if (frontAssemblyRef.current) {
+            frontAssemblyRef.current.setRotationFromAxisAngle(steeringAxis, steeringAngle.current);
+        }
+
         // 3. Rolling (Wheel spin based on speed)
-        const forwardDot = forwardDirection.dot(velocity);
-        // Multiply by -1 because the wheels are rotated 90deg on Y in the sub-group
-        const wheelSpinSpeed = -forwardDot * 2.0; 
+        const wheelRadius = 0.55;
+        const wheelSpinSpeed = forwardDot / wheelRadius; 
         currentWheelRotation.current += wheelSpinSpeed * delta;
 
         if (frontWheelRef.current) {
-            frontWheelRef.current.rotation.x = currentWheelRotation.current;
+            frontWheelRef.current.rotation.z = currentWheelRotation.current;
         }
         if (backWheelRef.current) {
-            backWheelRef.current.rotation.x = currentWheelRotation.current;
+            backWheelRef.current.rotation.z = currentWheelRotation.current;
         }
 
         // 4. The Lean (Banking)
         if (bikeChassisRef.current) {
-            // Negative Z rotation to lean left when facing -Z
-            const leanAmount = 0.4;
-            const targetLean = (left ? -leanAmount : right ? leanAmount : 0) * Math.min(speed / 5, 1);
+            const targetLean = steerAmount * -0.15 * turnMultiplier;
             bikeChassisRef.current.rotation.z = THREE.MathUtils.lerp(
                 bikeChassisRef.current.rotation.z,
                 targetLean,
-                5 * delta
+                8 * delta
             );
         }
 
         // Camera follow logic
         const translation = rigidBodyRef.current.translation();
-        playerPosition.set(translation.x, translation.y, translation.z);
+        const bikePos = new THREE.Vector3(translation.x, translation.y, translation.z);
 
-        // Camera behind player relative to bike orientation (+Z relative to bike facing -Z)
-        const cameraOffset = new THREE.Vector3(0, 4, 10).applyQuaternion(quaternion);
-        cameraPosition.copy(playerPosition).add(cameraOffset);
+        const idealOffset = forwardDirection.clone().multiplyScalar(-15).add(new THREE.Vector3(0, 10, 0));
+        const idealPosition = bikePos.clone().add(idealOffset);
+        
+        const idealTarget = bikePos.clone().add(
+            forwardDirection.clone().multiplyScalar(10)
+        );
 
-        state.camera.position.lerp(cameraPosition, 5 * delta);
-        cameraTarget.copy(playerPosition).add(new THREE.Vector3(0, 1.5, 0));
+        cameraPosition.lerp(idealPosition, 5 * delta);
+        cameraTarget.lerp(idealTarget, 15 * delta);
+
+        state.camera.position.copy(cameraPosition);
         state.camera.lookAt(cameraTarget);
     });
 
@@ -117,71 +123,113 @@ export default function Player() {
         <RigidBody
             ref={rigidBodyRef}
             colliders={false}
-            mass={1}
+            mass={20}
             type="dynamic"
             position={[0, 5, 0]}
-            friction={1}
-            linearDamping={2}
-            angularDamping={2}
-            enabledRotations={[false, true, false]}
+            friction={0}
+            restitution={0.1}
+            linearDamping={1.5}
+            angularDamping={4}
+            enabledRotations={enabledRotations}
         >
-            <CuboidCollider args={[0.3, 0.5, 1.4]} position={[0, 0.8, 0]} />
-            
+            {/* Front Wheel */}
+            <BallCollider args={[0.55]} position={[0, 0.55, 1.58]} />
+            {/* Back Wheel */}
+            <BallCollider args={[0.55]} position={[0, 0.55, -1.58]} />
+            {/* Bike Body */}
+            <CuboidCollider args={[0.3, 0.5, 1.4]} position={[0, 1.2, 0]} />
+
             <group ref={bikeChassisRef}>
-                <group rotation={[0, -Math.PI / 2, 0]}>
-                    {/* Main Body (Quadro) */}
-                    {nodes.Bike && (
-                        <mesh geometry={nodes.Bike.geometry} material={materials.Quadro} />
-                    )}
-                    
-                    {/* Back Wheel Assembly - ONLY ROLLS, DOES NOT STEER */}
-                    <group ref={backWheelRef} position={[-1.053, -1.178, 0.005]}>
-                        {nodes.Cylinder002_1 && <mesh geometry={nodes.Cylinder002_1.geometry} material={materials.Eixo} />}
-                        {nodes.Cylinder002_2 && <mesh geometry={nodes.Cylinder002_2.geometry} material={materials.Roda} />}
-                        {nodes.Torus003 && (
-                            <group rotation={[Math.PI / 2, 0, 0]} scale={[0.792, 0.546, 0.792]} position={[0.006, -0.003, 0]}>
+                {/* Scale 1.5 and correct offset/rotation matching BMX.tsx to align hitboxes correctly */}
+                <group position={[0, 3.2, 0]} rotation={[0, -Math.PI / 2, 0]} scale={1.5}>
+                    <mesh geometry={nodes.Bike.geometry} material={materials.Quadro}>
+                        {/* BACK WHEEL */}
+                        <group ref={backWheelRef} position={[-1.053, -1.178, 0.005]}>
+                            <group position={[0, 0, 0]}>
+                                <mesh geometry={nodes.Cylinder002_1.geometry} material={materials.Eixo} />
+                                <mesh geometry={nodes.Cylinder002_2.geometry} material={materials.Roda} />
+                            </group>
+                            <group position={[0.006, -0.003, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[0.792, 0.546, 0.792]}>
                                 <mesh geometry={nodes.Torus003.geometry} material={materials.Pneu} />
                                 <mesh geometry={nodes.Torus003_1.geometry} material={materials.Roda} />
                                 <mesh geometry={nodes.Torus003_2.geometry} material={materials.Faixa} />
                             </group>
-                        )}
-                        {nodes.B_Raios && <mesh geometry={nodes.B_Raios.geometry} material={materials.Raio} />}
-                    </group>
+                            <mesh geometry={nodes.B_Raios.geometry} material={materials.Raio} position={[0, 0, 0]} />
+                        </group>
 
-                    {/* Front Assembly (Fork + Handlebars + Front Wheel) */}
-                    <group ref={frontAssemblyRef} position={[1.308, 0.35, 0.012]}>
-                        <group position={[-1.308, -0.35, -0.012]}>
-                            {/* Fork */}
-                            {nodes.Cylinder004 && (
-                                <group position={[1.73, -0.423, 0.134]} rotation={[Math.PI / 2, 0, 0]} scale={[1, 3.023, 1]}>
-                                    <mesh geometry={nodes.Cylinder004.geometry} material={materials.Roda} />
-                                    <mesh geometry={nodes.Cylinder004_1.geometry} material={materials.Pneu} />
-                                </group>
-                            )}
-                            
-                            {/* Handlebars */}
-                            {nodes.Cylinder011 && (
-                                <group position={[1.308, 0.35, 0.012]} rotation={[Math.PI / 2, 0, 0]} scale={0.371}>
-                                    <mesh geometry={nodes.Cylinder011.geometry} material={materials.Raio} />
-                                    <mesh geometry={nodes.Cylinder011_1.geometry} material={materials.Pneu} />
-                                </group>
-                            )}
-
-                            {/* Front Wheel */}
-                            <group ref={frontWheelRef} position={[1.899, -1.178, 0.005]}>
-                                {nodes.Cylinder_1 && <mesh geometry={nodes.Cylinder_1.geometry} material={materials.Eixo} />}
-                                {nodes.Cylinder_2 && <mesh geometry={nodes.Cylinder_2.geometry} material={materials.Roda} />}
-                                {nodes.Torus002 && (
-                                    <group rotation={[Math.PI / 2, 0, 0]} scale={[0.792, 0.546, 0.792]} position={[0.006, -0.003, 0]}>
+                        {/* FRONT ASSEMBLY */}
+                        <group ref={frontAssemblyRef} position={[1.308, 0.35, 0.012]}>
+                            <group position={[-1.308, -0.35, -0.012]}>
+                                {/* FRONT WHEEL */}
+                                <group ref={frontWheelRef} position={[1.899, -1.178, 0.005]}>
+                                    <group position={[0, 0, 0]}>
+                                        <mesh geometry={nodes.Cylinder_1.geometry} material={materials.Eixo} />
+                                        <mesh geometry={nodes.Cylinder_2.geometry} material={materials.Roda} />
+                                    </group>
+                                    <group position={[0.006, -0.003, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[0.792, 0.546, 0.792]}>
                                         <mesh geometry={nodes.Torus002.geometry} material={materials.Pneu} />
                                         <mesh geometry={nodes.Torus002_1.geometry} material={materials.Roda} />
                                         <mesh geometry={nodes.Torus002_2.geometry} material={materials.Faixa} />
                                     </group>
-                                )}
-                                {nodes.F_Raios && <mesh geometry={nodes.F_Raios.geometry} material={materials.Raio} />}
+                                    <mesh geometry={nodes.F_Raios.geometry} material={materials.Raio} position={[0, 0, 0]} />
+                                </group>
+
+                                {/* FORK */}
+                                <group position={[1.73, -0.423, 0.134]} rotation={[Math.PI / 2, 0, 0]} scale={[1, 3.023, 1]}>
+                                    <mesh geometry={nodes.Cylinder004.geometry} material={materials.Roda} />
+                                    <mesh geometry={nodes.Cylinder004_1.geometry} material={materials.Pneu} />
+                                </group>
+
+                                {/* FRONT BRAKE CABLE */}
+                                <mesh geometry={nodes.CaboFreioFrente.geometry} material={materials.Pneu} position={[1.676, -0.253, -0.146]} />
+
+                                {/* HANDLEBARS */}
+                                <group position={[1.308, 0.35, 0.012]} rotation={[Math.PI / 2, 0, 0]} scale={0.371}>
+                                    <mesh geometry={nodes.Cylinder011.geometry} material={materials.Raio} />
+                                    <mesh geometry={nodes.Cylinder011_1.geometry} material={materials.Pneu} />
+                                </group>
+
+                                {/* BRAKE PART */}
+                                <mesh geometry={nodes.Sphere002.geometry} material={materials.Raio} position={[1.676, -0.251, -0.192]} scale={0.01} />
                             </group>
                         </group>
-                    </group>
+
+                        {/* REST OF BIKE */}
+                        <group position={[-0.428, -0.32, 0.011]} rotation={[1.571, -1.414, 3.142]} scale={[1, 3.023, 1]}>
+                            <mesh geometry={nodes.Cylinder006.geometry} material={materials.Roda} />
+                            <mesh geometry={nodes.Cylinder006_1.geometry} material={materials.Pneu} />
+                        </group>
+                        <mesh geometry={nodes.Cube.geometry} material={materials.Pneu} position={[-0.061, 0.319, 0]} scale={0.091} />
+
+                        {/* Pedals */}
+                        <group position={[0.272, -1.172, 0.013]}>
+                            <mesh geometry={nodes.Cylinder005.geometry} material={materials.PedalInterno} />
+                            <mesh geometry={nodes.Cylinder005_1.geometry} material={materials.PedalExterno} />
+                        </group>
+                        <mesh geometry={nodes.Cylinder001.geometry} material={materials.PedalInterno} position={[-1.029, -1.179, 0.165]} scale={0.501} />
+
+                        <group position={[0.286, -0.975, 0.155]} rotation={[Math.PI / 2, 0, 0]} scale={[0.207, 0.127, 0.207]}>
+                            <mesh geometry={nodes.Cylinder010.geometry} material={materials.Raio} />
+                            <mesh geometry={nodes.Cylinder010_1.geometry} material={materials.Pneu} />
+                        </group>
+                        <mesh geometry={nodes.NurbsCurve.geometry} material={materials.Pneu} position={[0.43, -0.796, 0.092]} rotation={[Math.PI / 2, 0, 0]} />
+                        <group position={[0.272, -1.527, -0.49]} scale={[3.421, 3.276, 10.4]}>
+                            <mesh geometry={nodes.Cylinder007.geometry} material={materials.Pneu} />
+                            <mesh geometry={nodes.Cylinder007_1.geometry} material={materials.Quadro} />
+                        </group>
+                        <group position={[0.272, -0.814, 0.522]} scale={[3.421, 3.276, 10.4]}>
+                            <mesh geometry={nodes.Cylinder008.geometry} material={materials.Pneu} />
+                            <mesh geometry={nodes.Cylinder008_1.geometry} material={materials.Quadro} />
+                        </group>
+                        <mesh geometry={nodes.Sphere.geometry} material={materials.Roda} position={[-0.381, -0.26, 0.18]} scale={0.009} />
+                    </mesh>
+                </group>
+            </group>
+        </RigidBody>
+    );
+}
+
+useGLTF.preload("/models/bike.gltf");
 
                     {/* Other parts */}
                     {nodes.Cylinder006 && (
