@@ -4,7 +4,7 @@ import { Canvas } from "@react-three/fiber";
 import { KeyboardControls, KeyboardControlsEntry } from "@react-three/drei";
 import { Physics } from "@react-three/rapier";
 import Skatepark from "@/components/Skatepark";
-import BMX from "@/components/BMX";
+import Player from "@/components/Player";
 import { useMemo } from "react";
 
 enum Controls {
@@ -36,7 +36,7 @@ export default function Home() {
 
         <Physics gravity={[0, -18, 0]}>
           <Skatepark />
-          <BMX />
+          <Player />
         </Physics>
       </Canvas>
     </KeyboardControls>
