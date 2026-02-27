@@ -21,6 +21,7 @@ export default function Player() {
     const cameraPosition = new THREE.Vector3();
     const currentWheelRotation = useRef(0);
     const steeringAngle = useRef(0);
+    const accelerationTime = useRef(0);
 
     const enabledRotations = useMemo(() => [false, true, false] as [boolean, boolean, boolean], []);
     
@@ -46,28 +47,52 @@ export default function Player() {
         const upDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
         const forwardDot = forwardDirection.dot(velocity);
 
-        // Apply impulses (accelerate gradually to a top speed)
-        const maxSpeed = 18.0;
-        const engineForce = 120.0 * delta; // Scale by delta for smooth acceleration
+        // Track how long the pedal is held to increase acceleration exponentially
+        if (forward) {
+            accelerationTime.current += delta;
+        } else {
+            // Rapidly reset the acceleration momentum when the pedal is released
+            accelerationTime.current = 0;
+        }
+
+        // Apply impulses (accelerate faster the longer you hold the button)
+        const maxSpeed = 40.0; 
+        
+        // Base force + an exponentially increasing force based on time held. 
+        const dynamicForce = 150.0 + Math.pow(Math.min(accelerationTime.current, 3.5), 2.5) * 40.0;
+        const engineForce = dynamicForce * delta;
+        const reverseForce = 150.0 * delta;
         
         if (forward && forwardDot < maxSpeed) {
             rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(engineForce), true);
         }
         if (backward && forwardDot > -maxSpeed * 0.5) {
-            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-engineForce * 0.6), true);
+            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-reverseForce), true);
         }
 
+        // --- GRIP AND HANDLING ---
+        // Cancel lateral velocity to stop the bike from sliding like it's on ice
+        const rightDirection = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+        const lateralSpeed = velocity.dot(rightDirection);
+        const gripImpulse = rightDirection.multiplyScalar(-lateralSpeed * 30.0 * delta);
+        rigidBodyRef.current.applyImpulse(gripImpulse, true);
+
         // Apply torque for turning the physics body
-        const turnMultiplier = Math.min(speed / 2, 1) * (forwardDot < 0 ? -1 : 1);
+        const turnMultiplier = Math.min(speed / 5.0, 1.0) * (forwardDot < 0 ? -1 : 1);
         let steerAmount = 0;
         if (left) steerAmount = 1;
         if (right) steerAmount = -1;
 
-        if (steerAmount !== 0) {
-            const steeringImpulse = steerAmount * turnMultiplier * delta * 30.0; // Smoother turning
+        if (steerAmount !== 0 && speed > 0.5) {
+            const steeringImpulse = steerAmount * turnMultiplier * delta * 70.0; // Smoother turning
             rigidBodyRef.current.applyTorqueImpulse(
                 upDirection.clone().multiplyScalar(steeringImpulse), true
             );
+        }
+
+        // Simulated air/tire friction to slow down rapidly when not pedaling
+        if (!forward && !backward && speed > 0.1) {
+            rigidBodyRef.current.applyImpulse(velocity.clone().normalize().multiplyScalar(-speed * 15.0 * delta), true);
         }
 
         // 2. Visual Steering (Lerp custom angled axis)

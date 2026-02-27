@@ -16,8 +16,8 @@ import { Model as BowlCornerOuter } from "./skatepark/bowl-corner-outer";
 import { Model as BowlSide } from "./skatepark/bowl-side";
 
 export default function Skatepark() {
-    const floorSize = 100;
-    const wallHeight = 15;
+    const floorSize = 1000;
+    const wallHeight = 50;
     const wallThickness = 2;
     const concreteColor = "#acacac"; // Light grey
 
@@ -55,48 +55,50 @@ export default function Skatepark() {
             {/* ──────────────────────────────────────────────
           OVERHEAD LIGHTING
           ────────────────────────────────────────────── */}
-            <pointLight position={[0, 20, 0]} intensity={1.5} castShadow />
-            <pointLight position={[30, 20, 30]} intensity={1.2} />
-            <pointLight position={[-30, 20, -30]} intensity={1.2} />
-            <pointLight position={[30, 20, -30]} intensity={1.2} />
-            <pointLight position={[-30, 20, 30]} intensity={1.2} />
+            <pointLight position={[0, 40, 0]} intensity={2.0} castShadow />
+            <pointLight position={[100, 40, 100]} intensity={1.5} />
+            <pointLight position={[-100, 40, -100]} intensity={1.5} />
+            <pointLight position={[100, 40, -100]} intensity={1.5} />
+            <pointLight position={[-100, 40, 100]} intensity={1.5} />
 
             {/* ──────────────────────────────────────────────
           NEW 3D MODEL SKATEPARK ELEMENTS
           Note: Models need to be scaled up as the Kenney mini kit is quite small.
-          Scale of 5.0 seems appropriate for the BMX bike scale.
+          Scale of 15.0 applied INSIDE RigidBodies so colliders generate correctly.
           ────────────────────────────────────────────── */}
-            <group scale={8}>
+            <>
                 {/* Center Funbox made of modular obstacle pieces */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.6} restitution={0.05}>
-                    <group position={[0, 0, 0]}>
-                        <ObstacleEnd position={[0, 0, -1]} rotation={[0, Math.PI, 0]} />
+                <RigidBody type="fixed" colliders="trimesh" friction={0.6} restitution={0.05} position={[0, 0, 0]}>
+                    <group scale={15}>
+                        <ObstacleEnd position={[0, 0, -2]} rotation={[0, Math.PI, 0]} />
                         <ObstacleMiddle position={[0, 0, 0]} />
-                        <ObstacleEnd position={[0, 0, 1]} />
+                        <ObstacleEnd position={[0, 0, 2]} />
                     </group>
                 </RigidBody>
 
                 {/* A Half Pipe on one side */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.4} restitution={0.05}>
-                    <HalfPipe position={[-4, 0, 0]} rotation={[0, Math.PI / 2, 0]} />
+                <RigidBody type="fixed" colliders="trimesh" friction={0.4} restitution={0.05} position={[-225, 0, 0]}>
+                    <HalfPipe scale={15} rotation={[0, Math.PI / 2, 0]} />
                 </RigidBody>
 
                 {/* Wooden platform and rails */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.6}>
-                    <StructurePlatform position={[4, 0, 2]} />
-                    <StructureWood position={[4, 0, -2]} />
+                <RigidBody type="fixed" colliders="trimesh" friction={0.6} position={[225, 0, 150]}>
+                    <StructurePlatform scale={15} />
+                </RigidBody>
+                <RigidBody type="fixed" colliders="trimesh" friction={0.6} position={[225, 0, -150]}>
+                    <StructureWood scale={15} />
                 </RigidBody>
 
                 {/* Grind rail */}
-                <RigidBody type="fixed" colliders="hull" friction={0.2} restitution={0.05}>
-                    <RailHigh position={[0, 0, -3]} />
+                <RigidBody type="fixed" colliders="hull" friction={0.2} restitution={0.05} position={[0, 0, -225]}>
+                    <RailHigh scale={15} />
                 </RigidBody>
 
                 {/* A Quarter Pipe (Bowl Side) against a wall */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.5}>
-                    <BowlSide position={[0, 0, 4]} />
+                <RigidBody type="fixed" colliders="trimesh" friction={0.5} position={[0, 0, 300]}>
+                    <BowlSide scale={15} />
                 </RigidBody>
-            </group>
+            </>
         </>
     );
 }
