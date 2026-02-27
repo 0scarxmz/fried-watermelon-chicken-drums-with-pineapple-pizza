@@ -34,7 +34,7 @@ export default function Home() {
         {/* Soft fill light from the ceiling to ensure we can see everywhere */}
         <hemisphereLight args={["#ffffff", "#444444", 0.8]} />
 
-        <Physics gravity={[0, -18, 0]}>
+        <Physics gravity={[0, -35, 0]}>
           <Skatepark />
           <Player />
         </Physics>

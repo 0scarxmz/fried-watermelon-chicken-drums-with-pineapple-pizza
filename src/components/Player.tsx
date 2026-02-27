@@ -98,19 +98,33 @@ export default function Player() {
             rigidBodyRef.current.applyImpulse(velocity.clone().normalize().multiplyScalar(-speed * 15.0 * delta), true);
         }
 
-        // --- ROLL STABILIZATION (Strict Upright Lock) ---
-        // Instead of using explosive torques that can cause the physics engine to flip out,
-        // we directly clamp the local roll angle to 0 every frame.
+        // --- SAFE STABILIZATION (No NaN Explosions) ---
+        // Calculate current angles
         const euler = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
-        if (Math.abs(euler.z) > 0.001) {
-            euler.z = 0; // Force roll to 0
-            const correctedQuat = new THREE.Quaternion().setFromEuler(euler);
-            rigidBodyRef.current.setRotation(correctedQuat, true);
-            
-            // Also dampen the angular velocity so it doesn't build up invisible rolling momentum
-            const angvel = rigidBodyRef.current.angvel();
-            rigidBodyRef.current.setAngvel(new THREE.Vector3(angvel.x * 0.9, angvel.y, angvel.z * 0.5), true);
+        
+        // 1. Roll Stabilization: Force the bike to stay upright (left-to-right)
+        if (Math.abs(euler.z) > 0.01) {
+            const rollCorrect = -euler.z * 200.0 * delta;
+            rigidBodyRef.current.applyTorqueImpulse(forwardDirection.clone().multiplyScalar(rollCorrect), true);
         }
+
+        // 2. Pitch Stabilization: Let the bike angle up ramps, but gently pull it back down so it lands flat
+        if (Math.abs(euler.x) > 0.1) {
+            const pitchCorrect = -euler.x * 80.0 * delta;
+            rigidBodyRef.current.applyTorqueImpulse(rightDirection.clone().multiplyScalar(pitchCorrect), true);
+        }
+
+        // 3. Angular Dampening: Kill residual wobble/spin so the physics engine doesn't overcorrect
+        const angvel = rigidBodyRef.current.angvel();
+        // Convert global angular velocity to local space
+        const localAngVel = new THREE.Vector3(angvel.x, angvel.y, angvel.z).applyQuaternion(quaternion.clone().invert());
+        
+        // Apply dampening on local X (pitch) and local Z (roll)
+        const dampeningTorque = new THREE.Vector3();
+        dampeningTorque.add(rightDirection.clone().multiplyScalar(-localAngVel.x * 20.0 * delta)); // Dampen pitch
+        dampeningTorque.add(forwardDirection.clone().multiplyScalar(-localAngVel.z * 40.0 * delta)); // Dampen roll
+        
+        rigidBodyRef.current.applyTorqueImpulse(dampeningTorque, true);
 
         // 2. Visual Steering (Lerp custom angled axis)
         steeringAngle.current = THREE.MathUtils.lerp(
