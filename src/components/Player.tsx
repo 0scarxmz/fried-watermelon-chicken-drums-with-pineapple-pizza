@@ -23,7 +23,7 @@ export default function Player() {
     const steeringAngle = useRef(0);
     const accelerationTime = useRef(0);
 
-    const enabledRotations = useMemo(() => [true, true, false] as [boolean, boolean, boolean], []);
+    const enabledRotations = useMemo(() => [true, true, true] as [boolean, boolean, boolean], []);
     
     // The fork/handlebars pivot axis from BikeModel.tsx
     const steeringAxis = useMemo(() => new THREE.Vector3(-0.591, 1.528, 0).normalize(), []);
@@ -72,9 +72,10 @@ export default function Player() {
         }
 
         // --- GRIP AND HANDLING ---
-        // Cancel lateral velocity to stop the bike from sliding like it's on ice
+        // Cancel lateral velocity to stop the bike from sliding sideways completely
         const lateralSpeed = velocity.dot(rightDirection);
-        const gripImpulse = rightDirection.clone().multiplyScalar(-lateralSpeed * 30.0 * delta);
+        // High multiplier to instantly snap sideways momentum to 0
+        const gripImpulse = rightDirection.clone().multiplyScalar(-lateralSpeed * 60.0 * delta);
         rigidBodyRef.current.applyImpulse(gripImpulse, true);
 
         // Apply torque for turning the physics body
@@ -85,8 +86,10 @@ export default function Player() {
 
         if (steerAmount !== 0 && speed > 0.5) {
             const steeringImpulse = steerAmount * turnMultiplier * delta * 70.0; // Smoother turning
+            // Use GLOBAL Y axis for turning instead of local up. 
+            // If we use local up while on a ramp, it turns into a roll and flips the bike!
             rigidBodyRef.current.applyTorqueImpulse(
-                upDirection.clone().multiplyScalar(steeringImpulse), true
+                new THREE.Vector3(0, 1, 0).multiplyScalar(steeringImpulse), true
             );
         }
 
@@ -95,13 +98,18 @@ export default function Player() {
             rigidBodyRef.current.applyImpulse(velocity.clone().normalize().multiplyScalar(-speed * 15.0 * delta), true);
         }
 
-        // --- PITCH STABILIZATION (Anti-Flip) ---
-        // The bike can tilt up ramps naturally, but if it pitches too far (like doing an unwanted backflip),
-        // we apply a gentle counter-torque to auto-level it back out, just like in GTA 5!
+        // --- ROLL STABILIZATION (Strict Upright Lock) ---
+        // Instead of using explosive torques that can cause the physics engine to flip out,
+        // we directly clamp the local roll angle to 0 every frame.
         const euler = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
-        if (Math.abs(euler.x) > 0.1) {
-            const pitchLevelingTorque = rightDirection.clone().multiplyScalar(-euler.x * 35.0 * delta);
-            rigidBodyRef.current.applyTorqueImpulse(pitchLevelingTorque, true);
+        if (Math.abs(euler.z) > 0.001) {
+            euler.z = 0; // Force roll to 0
+            const correctedQuat = new THREE.Quaternion().setFromEuler(euler);
+            rigidBodyRef.current.setRotation(correctedQuat, true);
+            
+            // Also dampen the angular velocity so it doesn't build up invisible rolling momentum
+            const angvel = rigidBodyRef.current.angvel();
+            rigidBodyRef.current.setAngvel(new THREE.Vector3(angvel.x * 0.9, angvel.y, angvel.z * 0.5), true);
         }
 
         // 2. Visual Steering (Lerp custom angled axis)
