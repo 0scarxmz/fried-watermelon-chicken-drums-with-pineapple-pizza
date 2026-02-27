@@ -23,7 +23,7 @@ export default function Player() {
     const steeringAngle = useRef(0);
     const accelerationTime = useRef(0);
 
-    const enabledRotations = useMemo(() => [false, true, false] as [boolean, boolean, boolean], []);
+    const enabledRotations = useMemo(() => [true, true, false] as [boolean, boolean, boolean], []);
     
     // The fork/handlebars pivot axis from BikeModel.tsx
     const steeringAxis = useMemo(() => new THREE.Vector3(-0.591, 1.528, 0).normalize(), []);
@@ -45,6 +45,7 @@ export default function Player() {
         // Face +Z
         const forwardDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion);
         const upDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
+        const rightDirection = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
         const forwardDot = forwardDirection.dot(velocity);
 
         // Track how long the pedal is held to increase acceleration exponentially
@@ -72,9 +73,8 @@ export default function Player() {
 
         // --- GRIP AND HANDLING ---
         // Cancel lateral velocity to stop the bike from sliding like it's on ice
-        const rightDirection = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
         const lateralSpeed = velocity.dot(rightDirection);
-        const gripImpulse = rightDirection.multiplyScalar(-lateralSpeed * 30.0 * delta);
+        const gripImpulse = rightDirection.clone().multiplyScalar(-lateralSpeed * 30.0 * delta);
         rigidBodyRef.current.applyImpulse(gripImpulse, true);
 
         // Apply torque for turning the physics body
@@ -93,6 +93,15 @@ export default function Player() {
         // Simulated air/tire friction to slow down rapidly when not pedaling
         if (!forward && !backward && speed > 0.1) {
             rigidBodyRef.current.applyImpulse(velocity.clone().normalize().multiplyScalar(-speed * 15.0 * delta), true);
+        }
+
+        // --- PITCH STABILIZATION (Anti-Flip) ---
+        // The bike can tilt up ramps naturally, but if it pitches too far (like doing an unwanted backflip),
+        // we apply a gentle counter-torque to auto-level it back out, just like in GTA 5!
+        const euler = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
+        if (Math.abs(euler.x) > 0.1) {
+            const pitchLevelingTorque = rightDirection.clone().multiplyScalar(-euler.x * 35.0 * delta);
+            rigidBodyRef.current.applyTorqueImpulse(pitchLevelingTorque, true);
         }
 
         // 2. Visual Steering (Lerp custom angled axis)

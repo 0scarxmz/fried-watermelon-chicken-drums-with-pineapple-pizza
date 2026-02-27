@@ -26,26 +26,34 @@ export default function Skatepark() {
             {/* ──────────────────────────────────────────────
           THE WAREHOUSE ROOM (Base Environment)
           ────────────────────────────────────────────── */}
+            {/* Floor */}
             <RigidBody type="fixed" friction={1.5} restitution={0.1}>
-                {/* Floor */}
                 <mesh receiveShadow position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                     <planeGeometry args={[floorSize, floorSize]} />
                     <meshStandardMaterial color={concreteColor} roughness={0.8} />
                 </mesh>
+            </RigidBody>
 
-                {/* Walls */}
+            {/* Walls - Each gets its own RigidBody to prevent invisible compound hulls! */}
+            <RigidBody type="fixed">
                 <mesh receiveShadow position={[0, wallHeight / 2, -floorSize / 2 - wallThickness / 2]}>
                     <boxGeometry args={[floorSize, wallHeight, wallThickness]} />
                     <meshStandardMaterial color={concreteColor} roughness={0.9} />
                 </mesh>
+            </RigidBody>
+            <RigidBody type="fixed">
                 <mesh receiveShadow position={[0, wallHeight / 2, floorSize / 2 + wallThickness / 2]}>
                     <boxGeometry args={[floorSize, wallHeight, wallThickness]} />
                     <meshStandardMaterial color={concreteColor} roughness={0.9} />
                 </mesh>
+            </RigidBody>
+            <RigidBody type="fixed">
                 <mesh receiveShadow position={[-floorSize / 2 - wallThickness / 2, wallHeight / 2, 0]}>
                     <boxGeometry args={[wallThickness, wallHeight, floorSize]} />
                     <meshStandardMaterial color={concreteColor} roughness={0.9} />
                 </mesh>
+            </RigidBody>
+            <RigidBody type="fixed">
                 <mesh receiveShadow position={[floorSize / 2 + wallThickness / 2, wallHeight / 2, 0]}>
                     <boxGeometry args={[wallThickness, wallHeight, floorSize]} />
                     <meshStandardMaterial color={concreteColor} roughness={0.9} />
@@ -63,12 +71,15 @@ export default function Skatepark() {
 
             {/* ──────────────────────────────────────────────
           NEW 3D MODEL SKATEPARK ELEMENTS
-          Note: Models need to be scaled up as the Kenney mini kit is quite small.
-          Scale of 15.0 applied INSIDE RigidBodies so colliders generate correctly.
           ────────────────────────────────────────────── */}
             <>
-                {/* Center Funbox made of modular obstacle pieces */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.6} restitution={0.05} position={[0, 0, 0]}>
+                {/* Half Pipe on the left */}
+                <RigidBody type="fixed" colliders="trimesh" friction={0.4} restitution={0.05} position={[-80, 0, 0]}>
+                    <HalfPipe scale={15} rotation={[0, Math.PI / 2, 0]} />
+                </RigidBody>
+
+                {/* Funbox moved forward to not block spawn at [0,0,0] */}
+                <RigidBody type="fixed" colliders="trimesh" friction={0.6} restitution={0.05} position={[0, 0, -100]}>
                     <group scale={15}>
                         <ObstacleEnd position={[0, 0, -2]} rotation={[0, Math.PI, 0]} />
                         <ObstacleMiddle position={[0, 0, 0]} />
@@ -76,26 +87,13 @@ export default function Skatepark() {
                     </group>
                 </RigidBody>
 
-                {/* A Half Pipe on one side */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.4} restitution={0.05} position={[-225, 0, 0]}>
-                    <HalfPipe scale={15} rotation={[0, Math.PI / 2, 0]} />
-                </RigidBody>
-
-                {/* Wooden platform and rails */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.6} position={[225, 0, 150]}>
+                {/* Wooden platform on the right */}
+                <RigidBody type="fixed" colliders="trimesh" friction={0.6} position={[80, 0, 0]}>
                     <StructurePlatform scale={15} />
                 </RigidBody>
-                <RigidBody type="fixed" colliders="trimesh" friction={0.6} position={[225, 0, -150]}>
-                    <StructureWood scale={15} />
-                </RigidBody>
-
-                {/* Grind rail */}
-                <RigidBody type="fixed" colliders="hull" friction={0.2} restitution={0.05} position={[0, 0, -225]}>
-                    <RailHigh scale={15} />
-                </RigidBody>
-
-                {/* A Quarter Pipe (Bowl Side) against a wall */}
-                <RigidBody type="fixed" colliders="trimesh" friction={0.5} position={[0, 0, 300]}>
+                
+                {/* Quarter Pipe Bowl far back */}
+                <RigidBody type="fixed" colliders="trimesh" friction={0.5} position={[0, 0, 120]}>
                     <BowlSide scale={15} />
                 </RigidBody>
             </>
