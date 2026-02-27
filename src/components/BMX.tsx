@@ -3,7 +3,7 @@
 import React, { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useKeyboardControls } from "@react-three/drei";
-import { RigidBody, RapierRigidBody, CuboidCollider } from "@react-three/rapier";
+import { RigidBody, RapierRigidBody, CuboidCollider, BallCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BikeModel } from "./BikeModel";
 
@@ -20,9 +20,9 @@ export default function BMX() {
 
     const [, getKeys] = useKeyboardControls();
 
-    // Stable refs for enabledRotations
+    // Stable refs for enabledRotations - allow pitch (X) and yaw (Y) but lock roll (Z)
     const enabledRotations = useMemo(
-        () => [false, true, false] as [boolean, boolean, boolean],
+        () => [true, true, false] as [boolean, boolean, boolean],
         []
     );
 
@@ -61,7 +61,7 @@ export default function BMX() {
                 forwardDirection.clone().multiplyScalar(engineForce), true
             );
         }
-        
+
         // If backward is pressed, we brake (or reverse).
         // But if forward AND backward are pressed, we don't brake, allowing us to gain speed for a wheelie!
         if (backward && !forward) {
@@ -73,7 +73,18 @@ export default function BMX() {
         // --- JUMPING ---
         // A simple ground check (Assuming flat ground)
         const pos = bikeRef.current.translation();
-        const isGrounded = pos.y < 1.0;
+
+        // --- RESPAWN ---
+        // If the bike falls through the map, teleport back to center
+        if (pos.y < -5) {
+            bikeRef.current.setTranslation({ x: 0, y: 5, z: 0 }, true);
+            bikeRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            bikeRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+            return;
+        }
+
+        // Warehouse floor is at Y=0
+        const isGrounded = pos.y < 1.5;
 
         if (jump) {
             // Charge the jump up to 1 second
@@ -84,7 +95,7 @@ export default function BMX() {
                 // Base jump + charged jump - lowered significantly for realism
                 const jumpStrength = 40 + jumpCharge.current * 60; // Tuned for mass=20
                 const jumpImpulse = upDirection.clone().multiplyScalar(jumpStrength);
-                
+
                 // Add a forward boost if moving to simulate pumping a ramp
                 if (speed > 2) {
                     jumpImpulse.add(forwardDirection.clone().multiplyScalar(jumpStrength * 0.3));
@@ -104,7 +115,8 @@ export default function BMX() {
         if (right) steerAmount = -1;
 
         if (steerAmount !== 0) {
-            const steeringImpulse = steerAmount * turnMultiplier * delta * 160;
+            // Significantly reduce steering sensitivity (was 160)
+            const steeringImpulse = steerAmount * turnMultiplier * delta * 50;
             bikeRef.current.applyTorqueImpulse(
                 upDirection.clone().multiplyScalar(steeringImpulse), true
             );
@@ -152,7 +164,7 @@ export default function BMX() {
         // High helicopter chase camera: pulls back and up, rotating with the bike
         const idealOffset = forwardDirection.clone().multiplyScalar(-18).add(new THREE.Vector3(0, 15, 0));
         const idealPosition = bikePos.clone().add(idealOffset);
-        
+
         // Look ahead of the bike so the player can see what's in front of them
         const idealTarget = bikePos.clone().add(
             forwardDirection.clone().multiplyScalar(10)
@@ -171,13 +183,18 @@ export default function BMX() {
             colliders={false}
             enabledRotations={enabledRotations}
             mass={20}
-            position={[0, 3, 0]}
+            position={[0, 5, 0]}
             friction={0}
             restitution={0.1}
             linearDamping={1.5}
-            angularDamping={3}
+            angularDamping={4} // Increased angular damping slightly to prevent wild flips
         >
-            <CuboidCollider args={[0.5, 0.9, 1.2]} position={[0, 0.9, 0]} />
+            {/* Front Wheel */}
+            <BallCollider args={[0.55]} position={[0, 0.55, 1.58]} />
+            {/* Back Wheel */}
+            <BallCollider args={[0.55]} position={[0, 0.55, -1.58]} />
+            {/* Bike Body */}
+            <CuboidCollider args={[0.3, 0.5, 1.4]} position={[0, 1.2, 0]} />
 
             {/* Pivot group for lean (rotates around center) */}
             <group ref={leanRef}>
