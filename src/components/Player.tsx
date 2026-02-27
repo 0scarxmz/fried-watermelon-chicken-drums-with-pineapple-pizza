@@ -22,7 +22,7 @@ export default function Player() {
     const currentWheelRotation = useRef(0);
     const steeringAngle = useRef(0);
 
-    const enabledRotations = useMemo(() => [true, true, false] as [boolean, boolean, boolean], []);
+    const enabledRotations = useMemo(() => [false, true, false] as [boolean, boolean, boolean], []);
     
     // The fork/handlebars pivot axis from BikeModel.tsx
     const steeringAxis = useMemo(() => new THREE.Vector3(-0.591, 1.528, 0).normalize(), []);
@@ -46,23 +46,25 @@ export default function Player() {
         const upDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
         const forwardDot = forwardDirection.dot(velocity);
 
-        // Apply impulses
-        const impulseStrength = 20.0;
-        if (forward) {
-            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(impulseStrength), true);
+        // Apply impulses (accelerate gradually to a top speed)
+        const maxSpeed = 18.0;
+        const engineForce = 120.0 * delta; // Scale by delta for smooth acceleration
+        
+        if (forward && forwardDot < maxSpeed) {
+            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(engineForce), true);
         }
-        if (backward) {
-            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-impulseStrength * 0.6), true);
+        if (backward && forwardDot > -maxSpeed * 0.5) {
+            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-engineForce * 0.6), true);
         }
 
         // Apply torque for turning the physics body
-        const turnMultiplier = Math.min(speed / 3, 1) * (forwardDot < 0 ? -1 : 1);
+        const turnMultiplier = Math.min(speed / 2, 1) * (forwardDot < 0 ? -1 : 1);
         let steerAmount = 0;
         if (left) steerAmount = 1;
         if (right) steerAmount = -1;
 
         if (steerAmount !== 0) {
-            const steeringImpulse = steerAmount * turnMultiplier * delta * 50;
+            const steeringImpulse = steerAmount * turnMultiplier * delta * 30.0; // Smoother turning
             rigidBodyRef.current.applyTorqueImpulse(
                 upDirection.clone().multiplyScalar(steeringImpulse), true
             );
@@ -223,22 +225,6 @@ export default function Player() {
                         </group>
                         <mesh geometry={nodes.Sphere.geometry} material={materials.Roda} position={[-0.381, -0.26, 0.18]} scale={0.009} />
                     </mesh>
-                </group>
-            </group>
-        </RigidBody>
-    );
-}
-
-useGLTF.preload("/models/bike.gltf");
-
-                    {/* Other parts */}
-                    {nodes.Cylinder006 && (
-                        <group position={[-0.428, -0.32, 0.011]} rotation={[1.571, -1.414, 3.142]} scale={[1, 3.023, 1]}>
-                            <mesh geometry={nodes.Cylinder006.geometry} material={materials.Roda} />
-                            <mesh geometry={nodes.Cylinder006_1.geometry} material={materials.Pneu} />
-                        </group>
-                    )}
-                    {nodes.Cube && <mesh geometry={nodes.Cube.geometry} material={materials.Pneu} position={[-0.061, 0.319, 0]} scale={0.091} />}
                 </group>
             </group>
         </RigidBody>
