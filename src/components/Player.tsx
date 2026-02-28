@@ -54,10 +54,12 @@ export default function Player() {
         const maxSpeed = 15.0;
 
         if (forward && forwardDot < maxSpeed) {
-            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(engineForce), true);
+            const impulse = forwardDirection.clone().multiplyScalar(engineForce);
+            rigidBodyRef.current.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
         }
         if (backward && forwardDot > -maxSpeed * 0.5) {
-            rigidBodyRef.current.applyImpulse(forwardDirection.clone().multiplyScalar(-reverseForce), true);
+            const impulse = forwardDirection.clone().multiplyScalar(-reverseForce);
+            rigidBodyRef.current.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
         }
 
         // --- GRIP AND HANDLING ---
