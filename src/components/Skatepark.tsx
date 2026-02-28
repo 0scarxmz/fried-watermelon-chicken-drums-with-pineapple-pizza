@@ -28,8 +28,8 @@ export default function Skatepark() {
           ────────────────────────────────────────────── */}
             {/* Floor */}
             <RigidBody type="fixed" friction={1.5} restitution={0.1}>
-                <mesh receiveShadow position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                    <planeGeometry args={[floorSize, floorSize]} />
+                <mesh receiveShadow position={[0, -0.5, 0]}>
+                    <boxGeometry args={[floorSize, 1, floorSize]} />
                     <meshStandardMaterial color={concreteColor} roughness={0.8} />
                 </mesh>
             </RigidBody>
