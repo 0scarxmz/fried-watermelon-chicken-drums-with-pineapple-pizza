@@ -3,123 +3,49 @@
 import React, { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useKeyboardControls } from "@react-three/drei";
-import { RigidBody, RapierRigidBody, CuboidCollider, BallCollider } from "@react-three/rapier";
 import * as THREE from "three";
 import { BikeModel } from "./BikeModel";
 
 export default function BMX() {
-    const bikeRef = useRef<RapierRigidBody>(null!);
+    const playerRef = useRef<THREE.Group>(null!);
     const leanRef = useRef<THREE.Group>(null!);
     const pitchRef = useRef<THREE.Group>(null!);
     const wheelAngle = useRef(0);
     const steeringAngle = useRef(0);
-    const jumpCharge = useRef(0);
-    const wasJumping = useRef(false);
+
     const smoothedCameraPosition = useRef(new THREE.Vector3(0, 25, 15));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
 
     const [, getKeys] = useKeyboardControls();
 
-    // Stable refs for enabledRotations - allow pitch (X) and yaw (Y) but lock roll (Z)
-    const enabledRotations = useMemo(
-        () => [true, true, false] as [boolean, boolean, boolean],
-        []
-    );
+    const speed = 10;
+    const turnSpeed = 2;
 
     useFrame((state, delta) => {
-        if (!bikeRef.current) return;
+        if (!playerRef.current) return;
 
-        // "jump" from keyboard controls needs to be in getKeys, we added it in page.tsx
-        // If typescript complains, we can cast it
         const keys = getKeys() as Record<string, boolean>;
         const forward = keys.forward;
         const backward = keys.backward;
         const left = keys.left;
         const right = keys.right;
-        const jump = keys.jump;
 
-        const linvel = bikeRef.current.linvel();
-        const velocity = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
-
-        // Get bike's current rotation
-        const rotation = bikeRef.current.rotation();
-        const quaternion = new THREE.Quaternion(
-            rotation.x, rotation.y, rotation.z, rotation.w
-        );
-
-        // +Z is forward
-        const forwardDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion);
-        const upDirection = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
-
-        const speed = velocity.length();
-        const forwardDot = forwardDirection.dot(velocity);
-
-        // --- MOVEMENT ---
-        const engineForce = 8.0;
+        // 1. Simple manual translation/rotation without physics
         if (forward) {
-            bikeRef.current.applyImpulse(
-                forwardDirection.clone().multiplyScalar(engineForce), true
-            );
+            playerRef.current.translateZ(speed * delta);
         }
-
-        // If backward is pressed, we brake (or reverse).
-        // But if forward AND backward are pressed, we don't brake, allowing us to gain speed for a wheelie!
-        if (backward && !forward) {
-            bikeRef.current.applyImpulse(
-                forwardDirection.clone().multiplyScalar(-engineForce * 0.6), true
-            );
+        if (backward) {
+            playerRef.current.translateZ(-speed * delta);
         }
-
-        // --- JUMPING ---
-        // A simple ground check (Assuming flat ground)
-        const pos = bikeRef.current.translation();
-
-        // --- RESPAWN ---
-        // If the bike falls through the map, teleport back to center
-        if (pos.y < -5) {
-            bikeRef.current.setTranslation({ x: 0, y: 5, z: 0 }, true);
-            bikeRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            bikeRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
-            return;
-        }
-
-        // Warehouse floor is at Y=0
-        const isGrounded = pos.y < 1.5;
-
-        if (jump) {
-            // Charge the jump up to 1 second
-            jumpCharge.current = Math.min(jumpCharge.current + delta, 1.0);
-        } else if (wasJumping.current && !jump) {
-            // Released jump
-            if (isGrounded) {
-                // Base jump + charged jump - lowered significantly for realism
-                const jumpStrength = 40 + jumpCharge.current * 60; // Tuned for mass=20
-                const jumpImpulse = upDirection.clone().multiplyScalar(jumpStrength);
-
-                // Add a forward boost if moving to simulate pumping a ramp
-                if (speed > 2) {
-                    jumpImpulse.add(forwardDirection.clone().multiplyScalar(jumpStrength * 0.3));
-                }
-
-                bikeRef.current.applyImpulse(jumpImpulse, true);
-            }
-            jumpCharge.current = 0;
-        }
-        wasJumping.current = jump;
-
-        // --- STEERING ---
-        const turnMultiplier = Math.min(speed / 3, 1) * (forwardDot < 0 ? -1 : 1);
-
+        
         let steerAmount = 0;
-        if (left) steerAmount = 1;
-        if (right) steerAmount = -1;
-
-        if (steerAmount !== 0) {
-            // Significantly reduce steering sensitivity (was 160)
-            const steeringImpulse = steerAmount * turnMultiplier * delta * 50;
-            bikeRef.current.applyTorqueImpulse(
-                upDirection.clone().multiplyScalar(steeringImpulse), true
-            );
+        if (left) {
+            playerRef.current.rotateY(turnSpeed * delta);
+            steerAmount = 1;
+        }
+        if (right) {
+            playerRef.current.rotateY(-turnSpeed * delta);
+            steerAmount = -1;
         }
 
         // --- VISUAL: Steering ---
@@ -129,24 +55,14 @@ export default function BMX() {
 
         // --- VISUAL: Wheelie & Lean ---
         if (leanRef.current && pitchRef.current) {
-            // Lean into turns
-            const targetLean = steerAmount * -0.15 * turnMultiplier;
+            const targetLean = steerAmount * -0.15;
             leanRef.current.rotation.z = THREE.MathUtils.lerp(
                 leanRef.current.rotation.z, targetLean, 8 * delta
             );
 
-            // Wheelie and Air logic
             let targetPitch = 0;
-            if (!isGrounded) {
-                // Mid-air animation: tip bike based on vertical velocity
-                // When going up, pitch up slightly. When falling, pitch down.
-                targetPitch = -THREE.MathUtils.clamp(linvel.y * 0.05, -0.4, 0.4);
-            } else if (backward) {
-                // Wheelie active on ground.
-                targetPitch = -Math.PI / 5; // Pitch back by 36 degrees
-            } else if (jump) {
-                // Visual jump anticipation squash
-                targetPitch = jumpCharge.current * 0.2; // slight tip forward while charging
+            if (backward) {
+                targetPitch = -Math.PI / 5; 
             }
 
             pitchRef.current.rotation.x = THREE.MathUtils.lerp(
@@ -156,17 +72,19 @@ export default function BMX() {
 
         // --- VISUAL: Calculate Wheel Spin ---
         const wheelRadius = 0.55;
-        wheelAngle.current += (forwardDot / wheelRadius) * delta;
+        if (forward || backward) {
+            const direction = forward ? 1 : -1;
+            wheelAngle.current += (direction * speed / wheelRadius) * delta;
+        }
 
         // --- CAMERA ---
-        const bikePos = new THREE.Vector3(pos.x, pos.y, pos.z);
+        const playerPos = playerRef.current.position;
+        const forwardDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(playerRef.current.quaternion);
 
-        // High helicopter chase camera: pulls back and up, rotating with the bike
         const idealOffset = forwardDirection.clone().multiplyScalar(-18).add(new THREE.Vector3(0, 15, 0));
-        const idealPosition = bikePos.clone().add(idealOffset);
+        const idealPosition = playerPos.clone().add(idealOffset);
 
-        // Look ahead of the bike so the player can see what's in front of them
-        const idealTarget = bikePos.clone().add(
+        const idealTarget = playerPos.clone().add(
             forwardDirection.clone().multiplyScalar(10)
         );
 
@@ -178,30 +96,10 @@ export default function BMX() {
     });
 
     return (
-        <RigidBody
-            ref={bikeRef}
-            colliders={false}
-            enabledRotations={enabledRotations}
-            mass={20}
-            position={[0, 5, 0]}
-            friction={0}
-            restitution={0.1}
-            linearDamping={1.5}
-            angularDamping={4} // Increased angular damping slightly to prevent wild flips
-        >
-            {/* Front Wheel */}
-            <BallCollider args={[0.55]} position={[0, 0.55, 1.58]} />
-            {/* Back Wheel */}
-            <BallCollider args={[0.55]} position={[0, 0.55, -1.58]} />
-            {/* Bike Body */}
-            <CuboidCollider args={[0.3, 0.5, 1.4]} position={[0, 1.2, 0]} />
-
-            {/* Pivot group for lean (rotates around center) */}
+        <group ref={playerRef} position={[0, 1.2, 0]}>
             <group ref={leanRef}>
-                {/* Pivot group for wheelie - pivots exactly at the back wheel's ground contact point (Z = -1.58, Y = 0) */}
                 <group position={[0, 0, -1.58]}>
                     <group ref={pitchRef}>
-                        {/* Translate back forward so bike center is at Z = 0 */}
                         <group position={[0, 0, 1.58]}>
                             <BikeModel
                                 wheelAngleRef={wheelAngle}
@@ -214,6 +112,6 @@ export default function BMX() {
                     </group>
                 </group>
             </group>
-        </RigidBody>
+        </group>
     );
 }
