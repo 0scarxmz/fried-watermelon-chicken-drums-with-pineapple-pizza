@@ -12,18 +12,25 @@ export default function Player() {
     const [, getKeys] = useKeyboardControls();
 
     const { scene } = useGLTF('/skateboard.glb');
-    const texture = useTexture('/colormap.png');
+    const bananaTexture = useTexture('/nano_banana.png');
 
-    // Apply texture to the skateboard model
     useEffect(() => {
-        texture.flipY = false;
-        scene.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-                const mesh = child as THREE.Mesh;
-                mesh.material = new THREE.MeshStandardMaterial({ map: texture });
-            }
-        });
-    }, [scene, texture]);
+        if (bananaTexture) {
+            bananaTexture.flipY = false;
+            bananaTexture.colorSpace = THREE.SRGBColorSpace;
+            scene.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh;
+                    // Ensure the material has the new map assigned
+                    if (mesh.material) {
+                        const mat = mesh.material as THREE.MeshStandardMaterial;
+                        mat.map = bananaTexture;
+                        mat.needsUpdate = true;
+                    }
+                }
+            });
+        }
+    }, [scene, bananaTexture]);
 
     const cameraTarget = new THREE.Vector3();
     const cameraPosition = new THREE.Vector3();
@@ -82,7 +89,7 @@ export default function Player() {
     return (
         <group ref={playerRef} position={[0, 1, 0]}>
             <group ref={meshRef}>
-                <primitive object={scene} position={[0, -0.4, 0]} rotation={[0, Math.PI, 0]} scale={1.5} />
+                <primitive object={scene} position={[0, -0.4, 0]} rotation={[0, Math.PI, 0]} scale={4.5} />
             </group>
         </group>
     );
