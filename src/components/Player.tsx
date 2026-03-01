@@ -12,25 +12,25 @@ export default function Player() {
     const [, getKeys] = useKeyboardControls();
 
     const { scene } = useGLTF('/skateboard.glb');
-    const bananaTexture = useTexture('/nano_banana.png');
+    const texture = useTexture('/colormap.png');
 
     useEffect(() => {
-        if (bananaTexture) {
-            bananaTexture.flipY = false;
-            bananaTexture.colorSpace = THREE.SRGBColorSpace;
+        if (texture) {
+            texture.flipY = false;
+            texture.colorSpace = THREE.SRGBColorSpace;
             scene.traverse((child) => {
                 if ((child as THREE.Mesh).isMesh) {
                     const mesh = child as THREE.Mesh;
                     // Ensure the material has the new map assigned
                     if (mesh.material) {
                         const mat = mesh.material as THREE.MeshStandardMaterial;
-                        mat.map = bananaTexture;
+                        mat.map = texture;
                         mat.needsUpdate = true;
                     }
                 }
             });
         }
-    }, [scene, bananaTexture]);
+    }, [scene, texture]);
 
     const cameraTarget = new THREE.Vector3();
     const cameraPosition = new THREE.Vector3();
