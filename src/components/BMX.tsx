@@ -40,11 +40,11 @@ export default function BMX() {
         
         let steerAmount = 0;
         if (left) {
-            playerRef.current.rotateY(turnSpeed * delta);
+            playerRef.current.rotation.y += turnSpeed * delta;
             steerAmount = 1;
         }
         if (right) {
-            playerRef.current.rotateY(-turnSpeed * delta);
+            playerRef.current.rotation.y -= turnSpeed * delta;
             steerAmount = -1;
         }
 

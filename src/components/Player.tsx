@@ -45,21 +45,18 @@ export default function Player() {
             playerRef.current.translateZ(-speed * delta);
         }
         if (left) {
-            playerRef.current.rotateY(turnSpeed * delta);
+            playerRef.current.rotation.y += turnSpeed * delta;
         }
         if (right) {
-            playerRef.current.rotateY(-turnSpeed * delta);
+            playerRef.current.rotation.y -= turnSpeed * delta;
         }
 
         // Apply visual lean to the skateboard mesh based on input
         if (meshRef.current) {
-            let targetLean = 0;
-            if (left) targetLean = 0.3;
-            if (right) targetLean = -0.3;
-
+            // Disabled visual lean to prevent the "flipping" behavior
             meshRef.current.rotation.z = THREE.MathUtils.lerp(
                 meshRef.current.rotation.z,
-                targetLean,
+                0,
                 10 * delta
             );
         }
