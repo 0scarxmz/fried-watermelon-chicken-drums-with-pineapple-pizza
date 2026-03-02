@@ -18,7 +18,9 @@ export default function Player() {
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
 
-    // Push logic variables removed in favor of standard movement
+    // Skate 4 Movement Logic
+    const lastPushTime = useRef(0);
+    const wasForwardPressed = useRef(false);
 
     const smoothedCameraPosition = useRef(new THREE.Vector3(0, 10, -10));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
@@ -75,18 +77,29 @@ export default function Player() {
         const speed = currentVelocity.length();
 
         // --- REALISTIC SPEED & NO SLIDING ---
-        const maxSpeed = 10; // Realistic slow max speed
-        const acceleration = 12;
+        const maxSpeed = 15; // Realistic max speed
+        const pushForce = 15; // Burst of speed per push
+        const pushInterval = 0.8; // Seconds between automatic pushes when holding
+        const tapCooldown = 0.2; // Minimum time between manual taps
         const braking = 25;
 
         if (isGrounded) {
             const dot = currentVelocity.dot(slopeForward);
 
-            if (forward && speed < maxSpeed) {
-                const accelForce = slopeForward.clone().multiplyScalar(acceleration * delta);
-                rbRef.current.applyImpulse({ x: accelForce.x, y: accelForce.y, z: accelForce.z }, true);
+            // --- TAP & HOLD TO PUSH ---
+            const timeSinceLastPush = now - lastPushTime.current;
+            const isTap = forward && !wasForwardPressed.current && timeSinceLastPush > tapCooldown;
+            const isHold = forward && wasForwardPressed.current && timeSinceLastPush > pushInterval;
+
+            if (isTap || isHold) {
+                if (speed < maxSpeed) {
+                    const accelForce = slopeForward.clone().multiplyScalar(pushForce);
+                    rbRef.current.applyImpulse({ x: accelForce.x, y: accelForce.y, z: accelForce.z }, true);
+                    lastPushTime.current = now;
+                }
             }
 
+            // --- BRAKING ---
             if (backward) {
                 if (dot > 0.2) {
                     const brakeForce = slopeForward.clone().multiplyScalar(-braking * delta);
@@ -103,31 +116,25 @@ export default function Player() {
             }
 
             // --- CANCEL LATERAL SLIDING ENTIRELY ---
-            // Re-align the player's velocity purely to their forward vector (if they are moving)
-            // This stops drifting/sliding completely.
             if (speed > 0.1) {
-                // Determine if we are moving forward or backward relative to the board
-                const dot = currentVelocity.dot(slopeForward);
                 const travelDirection = dot >= 0 ? 1 : -1;
-
-                // Construct a new velocity vector pointing perfectly forward or backward
                 const newVel = slopeForward.clone().multiplyScalar(speed * travelDirection);
-
-                // Immediately overwrite the linear velocity to eliminate lateral sliding
                 rbRef.current.setLinvel({ x: newVel.x, y: vel.y, z: newVel.z }, true);
             }
 
             // Downward force to stick to ramps
             rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
-        } else {
-            if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(5 * delta), true);
-            if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
         }
 
-        // --- TURNING ---
+        wasForwardPressed.current = forward;
+
+        // --- TURNING (DYNAMIC CARVING) ---
+        // Steer slower at high speeds, faster at low speeds for smooth carving
         let turnSpeed = 0;
-        if (left) turnSpeed = 3.5;
-        if (right) turnSpeed = -3.5;
+        const turnMultiplier = isGrounded ? Math.max(1.5, 4.0 - (speed * 0.15)) : 3.0; // Dynamic turn speed based on velocity
+
+        if (left) turnSpeed = turnMultiplier;
+        if (right) turnSpeed = -turnMultiplier;
 
         // Only allow turning if moving or in the air
         if (speed > 1 || !isGrounded) {
@@ -221,7 +228,7 @@ export default function Player() {
             friction={0}
             restitution={0}
             enabledRotations={[false, true, false]}
-            linearDamping={0.4}
+            linearDamping={0.2}
             angularDamping={4}
         >
             <BallCollider args={[0.2]} position={[0, 0.2, 0.4]} />
