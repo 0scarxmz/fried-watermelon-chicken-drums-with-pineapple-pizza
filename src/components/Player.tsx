@@ -18,10 +18,6 @@ export default function Player() {
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
 
-    // Skate 4 Movement Logic
-    const lastPushTime = useRef(0);
-    const wasForwardPressed = useRef(false);
-
     const smoothedCameraPosition = useRef(new THREE.Vector3(0, 10, -10));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
 
@@ -152,9 +148,6 @@ export default function Player() {
 
         // --- VISUALS ---
         if (meshRef.current) {
-            meshRef.current.position.lerp(new THREE.Vector3(0, 0, 0), 10 * delta);
-            meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, 0, 10 * delta);
-
             const targetUp = floorNormal.clone().normalize();
             const targetForward = forwardDir.clone().projectOnPlane(targetUp).normalize();
             const targetRight = new THREE.Vector3().crossVectors(targetUp, targetForward).normalize();
