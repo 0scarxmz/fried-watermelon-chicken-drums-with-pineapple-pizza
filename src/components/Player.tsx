@@ -11,33 +11,25 @@ export default function Player() {
 
     const [, getKeys] = useKeyboardControls();
 
-    const { scene } = useGLTF('/skateboard.glb');
-    const texture = useTexture('/colormap.png');
+    const { scene, materials } = useGLTF('/skateboard.glb') as any;
 
     useEffect(() => {
-        if (texture) {
-            texture.flipY = false;
-            texture.colorSpace = THREE.SRGBColorSpace;
-            scene.traverse((child) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const mesh = child as THREE.Mesh;
-                    // Ensure the material has the new map assigned
-                    if (mesh.material) {
-                        const mat = mesh.material as THREE.MeshStandardMaterial;
-                        mat.map = texture;
-                        mat.needsUpdate = true;
-                    }
+        // Ensure the scene uses its built-in materials correctly rather than overriding with a unified map
+        if (materials && materials.colormap) {
+            scene.traverse((child: any) => {
+                if (child.isMesh) {
+                    child.material = materials.colormap;
                 }
             });
         }
-    }, [scene, texture]);
+    }, [scene, materials]);
 
     const cameraTarget = new THREE.Vector3();
     const cameraPosition = new THREE.Vector3();
 
     // Start from 0: simple movement variables
-    const speed = 10;
-    const turnSpeed = 2;
+    const speed = 4;
+    const turnSpeed = 1.2;
 
     useFrame((state, delta) => {
         if (!playerRef.current) return;
@@ -59,11 +51,14 @@ export default function Player() {
         }
 
         // Apply visual lean to the skateboard mesh based on input
+        let targetLean = 0;
+        if (left && (forward || backward)) targetLean = 0.3;
+        if (right && (forward || backward)) targetLean = -0.3;
+
         if (meshRef.current) {
-            // Disabled visual lean to prevent the "flipping" behavior
             meshRef.current.rotation.z = THREE.MathUtils.lerp(
                 meshRef.current.rotation.z,
-                0,
+                targetLean,
                 10 * delta
             );
         }
