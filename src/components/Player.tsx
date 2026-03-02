@@ -83,19 +83,23 @@ export default function Player() {
         const moveSpeed = 25; 
         
         if (isGrounded) {
-            // Force gravity off so it CANNOT pull you down ramps
             rbRef.current.setGravityScale(0, true);
 
             if (!forward && !backward) {
                 // HARD STOP. Absolutely zero velocity.
                 rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+                
+                // Nuke all angular velocity too so we don't spin or drift
+                rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+                
+                // Instantly kill any residual physical momentum on the RigidBody
+                rbRef.current.resetForces(true);
+                rbRef.current.resetTorques(true);
             } else {
                 let targetSpeed = 0;
                 if (forward) targetSpeed = moveSpeed;
                 if (backward) targetSpeed = -moveSpeed;
 
-                // Move exactly along the direction you are facing.
-                // Add a small downward velocity to perfectly stick to the ramp surface.
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
                 const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
                 
@@ -205,8 +209,8 @@ export default function Player() {
             friction={0}
             restitution={0}
             enabledRotations={[false, true, false]}
-            linearDamping={0.2}
-            angularDamping={4}
+            linearDamping={10.0} // MASSIVE linear drag to prevent floating
+            angularDamping={10.0} // MASSIVE angular drag to prevent spinning
         >
             <BallCollider args={[0.2]} position={[0, 0.2, 0.4]} />
             <BallCollider args={[0.2]} position={[0, 0.2, -0.4]} />
