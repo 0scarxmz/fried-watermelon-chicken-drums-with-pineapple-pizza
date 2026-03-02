@@ -21,9 +21,9 @@ To achieve a realistic simulation, adhere strictly to these physical rules:
    - **Implementation:** Treat forward input as a discrete "kick" or "push". When the forward key is pressed (tapped), apply a one-time forward `applyImpulse` to the RigidBody. 
    - **Cooldown:** Implement a cooldown mechanism (e.g., 0.5 seconds) between valid pushes to simulate the physical time it takes a skater's leg to return to the board.
 
-2. **Coasting and Momentum Preservation**:
-   - **Rule:** The skateboard must NOT stop instantly when forward input is released.
-   - **Implementation:** Momentum must be conserved. The skateboard coasts and gradually loses speed over time primarily due to friction or a very low `linearDamping` on the RigidBody.
+2. **Releasing Input (No Drag/Coasting)**:
+   - **Rule:** The skateboard must NOT coast or preserve momentum when input is released.
+   - **Implementation:** The skateboard must rapidly decelerate to a complete stop as soon as the forward or backward keys are released, ensuring the player feels no "dragging" sensation.
 
 3. **Speed Caps**:
    - Limit the maximum speed so rapid pushes don't compound infinitely. Cap speed realistically using damping or opposing drag forces when `vel.length() > maxSpeed`.

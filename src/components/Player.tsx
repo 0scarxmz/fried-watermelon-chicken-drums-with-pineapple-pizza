@@ -98,16 +98,22 @@ export default function Player() {
                     forwardSpeed += pushForce;
                     lastPushTime.current = now;
                 }
+            } else if (!forward && !backward) {
+                // RAPID auto-stop when 'W' is released because the user hates the dragging sensation
+                const autoStopFriction = 60; // Stops extremely fast
+                if (forwardSpeed > 0) {
+                    forwardSpeed = Math.max(0, forwardSpeed - autoStopFriction * delta);
+                } else if (forwardSpeed < 0) {
+                    forwardSpeed = Math.min(0, forwardSpeed + autoStopFriction * delta);
+                }
             }
 
             // --- BRAKING ---
             if (backward) {
-                if (forwardSpeed > 0.5) {
-                    forwardSpeed -= braking * delta;
-                } else if (forwardSpeed < -0.5) {
-                    forwardSpeed += braking * delta; // Brake while going fakie
-                } else {
-                    forwardSpeed = 0;
+                if (forwardSpeed > 0) {
+                    forwardSpeed = Math.max(0, forwardSpeed - braking * delta);
+                } else if (forwardSpeed < 0) {
+                    forwardSpeed = Math.min(0, forwardSpeed + braking * delta); // Brake while going fakie
                 }
             }
 
