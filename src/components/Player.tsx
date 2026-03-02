@@ -77,68 +77,25 @@ export default function Player() {
         const horizontalVelocity = new THREE.Vector3(vel.x, 0, vel.z);
         const speedXZ = horizontalVelocity.length();
 
-        // --- REALISTIC SPEED & NO SLIDING ---
-        const maxSpeed = 15; // Realistic max speed
-        const pushForce = 6; // Burst of speed per push
-        const pushInterval = 0.8; // Seconds between automatic pushes when holding
-        const tapCooldown = 0.2; // Minimum time between manual taps
-        const braking = 25;
-
+        // --- ARCADE MOVEMENT ---
+        const moveSpeed = 18; 
+        
         if (isGrounded) {
-            // How fast are we going exactly along the direction the board is pointing?
-            let forwardSpeed = currentVelocity.dot(slopeForward);
+            let targetSpeed = 0;
+            if (forward) targetSpeed = moveSpeed;
+            if (backward) targetSpeed = -moveSpeed * 0.8;
 
-            // --- TAP & HOLD TO PUSH ---
-            const timeSinceLastPush = now - lastPushTime.current;
-            const isTap = forward && !wasForwardPressed.current && timeSinceLastPush > tapCooldown;
-            const isHold = forward && wasForwardPressed.current && timeSinceLastPush > pushInterval;
-
-            if (isTap || isHold) {
-                if (forwardSpeed < maxSpeed) {
-                    forwardSpeed += pushForce;
-                    lastPushTime.current = now;
-                }
-            } else if (!forward && !backward) {
-                // RAPID auto-stop when 'W' is released because the user hates the dragging sensation
-                const autoStopFriction = 60; // Stops extremely fast
-                if (forwardSpeed > 0) {
-                    forwardSpeed = Math.max(0, forwardSpeed - autoStopFriction * delta);
-                } else if (forwardSpeed < 0) {
-                    forwardSpeed = Math.min(0, forwardSpeed + autoStopFriction * delta);
-                }
-            }
-
-            // --- BRAKING ---
-            if (backward) {
-                if (forwardSpeed > 0) {
-                    forwardSpeed = Math.max(0, forwardSpeed - braking * delta);
-                } else if (forwardSpeed < 0) {
-                    forwardSpeed = Math.min(0, forwardSpeed + braking * delta); // Brake while going fakie
-                }
-            }
-
-            // Enforce maximum speed cap smoothly
-            if (forwardSpeed > maxSpeed) {
-                forwardSpeed = THREE.MathUtils.lerp(forwardSpeed, maxSpeed, 5 * delta);
-            } else if (forwardSpeed < -maxSpeed) {
-                forwardSpeed = THREE.MathUtils.lerp(forwardSpeed, -maxSpeed, 5 * delta);
-            }
-
-            // --- APPLY FORWARD MOMENTUM ---
-            // Re-align the velocity entirely along the slopeForward vector to eliminate sliding
-            const newVel = slopeForward.clone().multiplyScalar(forwardSpeed);
-
-            // Preserve any vertical velocity that isn't pushing into the floor (like bouncing)
+            // Apply velocity directly along the ramp slope for exact, snappy control
+            const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
             rbRef.current.setLinvel({ x: newVel.x, y: vel.y < 0 ? newVel.y : vel.y, z: newVel.z }, true);
 
-            // Downward force to stick to ramps
+            // Downward pull to stick to ramps
             rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
         } else {
+            // Minimal air control
             if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(5 * delta), true);
             if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
         }
-
-        wasForwardPressed.current = forward;
 
         // --- TURNING (DYNAMIC CARVING) ---
         // Steer slower at high speeds, faster at low speeds for smooth carving
