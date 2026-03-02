@@ -78,20 +78,31 @@ export default function Player() {
         const speedXZ = horizontalVelocity.length();
 
         // --- ARCADE MOVEMENT ---
-        const moveSpeed = 18; 
+        const moveSpeed = 25; 
         
         if (isGrounded) {
+            // Turn off gravity while on the ground so you NEVER slide down ramps
+            rbRef.current.setGravityScale(0, true);
+
             let targetSpeed = 0;
             if (forward) targetSpeed = moveSpeed;
-            if (backward) targetSpeed = -moveSpeed * 0.8;
+            if (backward) targetSpeed = -moveSpeed;
 
-            // Apply velocity directly along the ramp slope for exact, snappy control
-            const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
-            rbRef.current.setLinvel({ x: newVel.x, y: vel.y < 0 ? newVel.y : vel.y, z: newVel.z }, true);
-
-            // Downward pull to stick to ramps
-            rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
+            if (targetSpeed === 0) {
+                // INSTANT STOP. Zero velocity, zero sliding.
+                rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            } else {
+                // Apply velocity DIRECTLY along the ramp slope. No physics momentum.
+                const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
+                rbRef.current.setLinvel({ x: newVel.x, y: newVel.y, z: newVel.z }, true);
+                
+                // Downward force to visually stick to the ramp
+                rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
+            }
         } else {
+            // Re-enable gravity when in the air so you can fall/jump
+            rbRef.current.setGravityScale(1, true);
+            
             // Minimal air control
             if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(5 * delta), true);
             if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
