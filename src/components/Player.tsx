@@ -75,19 +75,25 @@ export default function Player() {
         const speed = currentVelocity.length();
 
         // --- REALISTIC SPEED & NO SLIDING ---
-        const maxSpeed = 12; // Realistic slow max speed
-        const acceleration = 15;
+        const maxSpeed = 10; // Realistic slow max speed
+        const acceleration = 12;
         const braking = 25;
 
         if (isGrounded) {
+            const dot = currentVelocity.dot(slopeForward);
+
             if (forward && speed < maxSpeed) {
                 const accelForce = slopeForward.clone().multiplyScalar(acceleration * delta);
                 rbRef.current.applyImpulse({ x: accelForce.x, y: accelForce.y, z: accelForce.z }, true);
             }
 
             if (backward) {
-                const brakeForce = slopeForward.clone().multiplyScalar(-braking * delta);
-                rbRef.current.applyImpulse({ x: brakeForce.x, y: brakeForce.y, z: brakeForce.z }, true);
+                if (dot > 0.2) {
+                    const brakeForce = slopeForward.clone().multiplyScalar(-braking * delta);
+                    rbRef.current.applyImpulse({ x: brakeForce.x, y: brakeForce.y, z: brakeForce.z }, true);
+                } else if (Math.abs(dot) <= 0.2) {
+                    rbRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+                }
             }
 
             // Enforce maximum speed cap smoothly
