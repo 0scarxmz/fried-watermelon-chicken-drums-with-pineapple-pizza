@@ -59,7 +59,7 @@ export default function Player() {
         const rbQuat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
         const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(rbQuat);
 
-        const rayOrigin = { x: pos.x, y: pos.y - 0.1, z: pos.z };
+        const rayOrigin = { x: pos.x, y: pos.y, z: pos.z };
         const rayDir = { x: 0, y: -1, z: 0 };
         const ray = new rapier.Ray(rayOrigin, rayDir);
         const hit = world.castRay(ray, 1.5, true);
@@ -67,7 +67,9 @@ export default function Player() {
         let floorNormal = new THREE.Vector3(0, 1, 0);
         let isGrounded = false;
 
-        if (hit && hit.toi < 0.35) {
+        // Start ray at center of board, so distance to floor is ~0.4 units. 
+        // 0.6 gives us a generous margin to stay stuck to the ground.
+        if (hit && hit.toi < 0.6) {
             isGrounded = true;
             floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
         }
@@ -81,23 +83,27 @@ export default function Player() {
         const moveSpeed = 25; 
         
         if (isGrounded) {
-            // Turn off gravity while on the ground so you NEVER slide down ramps
+            // Force gravity off so it CANNOT pull you down ramps
             rbRef.current.setGravityScale(0, true);
 
-            let targetSpeed = 0;
-            if (forward) targetSpeed = moveSpeed;
-            if (backward) targetSpeed = -moveSpeed;
-
-            if (targetSpeed === 0) {
-                // INSTANT STOP. Zero velocity, zero sliding.
+            if (!forward && !backward) {
+                // HARD STOP. Absolutely zero velocity.
                 rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
             } else {
-                // Apply velocity DIRECTLY along the ramp slope. No physics momentum.
+                let targetSpeed = 0;
+                if (forward) targetSpeed = moveSpeed;
+                if (backward) targetSpeed = -moveSpeed;
+
+                // Move exactly along the direction you are facing.
+                // Add a small downward velocity to perfectly stick to the ramp surface.
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
-                rbRef.current.setLinvel({ x: newVel.x, y: newVel.y, z: newVel.z }, true);
+                const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
                 
-                // Downward force to visually stick to the ramp
-                rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
+                rbRef.current.setLinvel({ 
+                    x: newVel.x + stickVel.x, 
+                    y: newVel.y + stickVel.y, 
+                    z: newVel.z + stickVel.z 
+                }, true);
             }
         } else {
             // Re-enable gravity when in the air so you can fall/jump
@@ -108,16 +114,13 @@ export default function Player() {
             if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
         }
 
-        // --- TURNING (DYNAMIC CARVING) ---
-        // Steer slower at high speeds, faster at low speeds for smooth carving
+        // --- TURNING ---
         let turnSpeed = 0;
-        const turnMultiplier = isGrounded ? Math.max(1.5, 4.0 - (speedXZ * 0.15)) : 3.0; // Dynamic turn speed based on velocity
+        if (left) turnSpeed = 3.5;
+        if (right) turnSpeed = -3.5;
 
-        if (left) turnSpeed = turnMultiplier;
-        if (right) turnSpeed = -turnMultiplier;
-
-        // Only allow turning if moving or in the air
-        if (speedXZ > 1 || !isGrounded) {
+        // Instant, snappy turning.
+        if (turnSpeed !== 0) {
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
         } else {
             rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -145,7 +148,6 @@ export default function Player() {
 
         // --- VISUALS ---
         if (meshRef.current) {
-            // Smoothly recover from the push jolt (both position and pitch rotation)
             meshRef.current.position.lerp(new THREE.Vector3(0, 0, 0), 10 * delta);
             meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, 0, 10 * delta);
 
@@ -158,12 +160,7 @@ export default function Player() {
 
             const localTargetQuat = targetQuat.clone().premultiply(rbQuat.clone().invert());
 
-            let targetLean = 0;
-            if (left && (forward || backward)) targetLean = -0.25;
-            if (right && (forward || backward)) targetLean = 0.25;
-            const leanQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), targetLean);
-
-            localTargetQuat.multiply(leanQuat);
+            // I REMOVED the sideways lean drifting animation entirely as requested
             meshRef.current.quaternion.slerp(localTargetQuat, 15 * delta);
         }
 
