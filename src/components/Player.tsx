@@ -17,9 +17,9 @@ export default function Player() {
     const isFlipping = useRef(false);
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
-    const lastPushTime = useRef(0);
 
-    // FIX: Using refs for the camera prevents it from violently snapping on React re-renders!
+    // Push logic variables removed in favor of standard movement
+
     const smoothedCameraPosition = useRef(new THREE.Vector3(0, 10, -10));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
 
@@ -57,8 +57,6 @@ export default function Player() {
         const rbQuat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
         const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(rbQuat);
 
-        // FIX: Start ray slightly BELOW the rigid body center. 
-        // This guarantees the ray NEVER hits the player's own colliders, fully fixing jumps.
         const rayOrigin = { x: pos.x, y: pos.y - 0.1, z: pos.z };
         const rayDir = { x: 0, y: -1, z: 0 };
         const ray = new rapier.Ray(rayOrigin, rayDir);
@@ -67,56 +65,67 @@ export default function Player() {
         let floorNormal = new THREE.Vector3(0, 1, 0);
         let isGrounded = false;
 
-        // Since we start the ray 0.1 units lower, the ground should be ~0.1 units away on a flat surface
         if (hit && hit.toi < 0.35) {
             isGrounded = true;
             floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
         }
 
         const slopeForward = forwardDir.clone().projectOnPlane(floorNormal).normalize();
+        const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+        const speed = currentVelocity.length();
 
-        // --- MOVEMENT & PHYSICS ---
+        // --- REALISTIC SPEED & NO SLIDING ---
+        const maxSpeed = 12; // Realistic slow max speed
+        const acceleration = 15;
+        const braking = 25;
+
         if (isGrounded) {
-            if (forward && now - lastPushTime.current > 1.2) {
-                lastPushTime.current = now;
-                const pushForce = slopeForward.clone().multiplyScalar(25);
-                rbRef.current.applyImpulse({ x: pushForce.x, y: pushForce.y, z: pushForce.z }, true);
-                if (meshRef.current) meshRef.current.position.z = 0.5;
+            if (forward && speed < maxSpeed) {
+                const accelForce = slopeForward.clone().multiplyScalar(acceleration * delta);
+                rbRef.current.applyImpulse({ x: accelForce.x, y: accelForce.y, z: accelForce.z }, true);
             }
 
             if (backward) {
-                const brakeForce = slopeForward.clone().multiplyScalar(-30 * delta);
+                const brakeForce = slopeForward.clone().multiplyScalar(-braking * delta);
                 rbRef.current.applyImpulse({ x: brakeForce.x, y: brakeForce.y, z: brakeForce.z }, true);
             }
 
-            const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-            const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(rbQuat).projectOnPlane(floorNormal).normalize();
-            
-            const lateralSpeed = currentVelocity.dot(rightDir);
-            const lateralForce = rightDir.clone().multiplyScalar(-50 * lateralSpeed * delta);
-            rbRef.current.applyImpulse({ x: lateralForce.x, y: lateralForce.y, z: lateralForce.z }, true);
+            // Enforce maximum speed cap smoothly
+            if (speed > maxSpeed) {
+                const dragDirection = currentVelocity.clone().normalize().multiplyScalar(-25 * delta);
+                rbRef.current.applyImpulse({ x: dragDirection.x, y: dragDirection.y, z: dragDirection.z }, true);
+            }
 
+            // --- CANCEL LATERAL SLIDING ENTIRELY ---
+            // Re-align the player's velocity purely to their forward vector (if they are moving)
+            // This stops drifting/sliding completely.
+            if (speed > 0.1) {
+                // Determine if we are moving forward or backward relative to the board
+                const dot = currentVelocity.dot(slopeForward);
+                const travelDirection = dot >= 0 ? 1 : -1;
+
+                // Construct a new velocity vector pointing perfectly forward or backward
+                const newVel = slopeForward.clone().multiplyScalar(speed * travelDirection);
+
+                // Immediately overwrite the linear velocity to eliminate lateral sliding
+                rbRef.current.setLinvel({ x: newVel.x, y: vel.y, z: newVel.z }, true);
+            }
+
+            // Downward force to stick to ramps
             rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
         } else {
-            if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(10 * delta), true);
-            if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-10 * delta), true);
+            if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(5 * delta), true);
+            if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
         }
 
         // --- TURNING ---
         let turnSpeed = 0;
-        if (left) turnSpeed = 4.0;
-        if (right) turnSpeed = -4.0;
-        
-        const currentSpeed = new THREE.Vector3(vel.x, vel.y, vel.z).length();
-        if (currentSpeed > 1 || !isGrounded) {
+        if (left) turnSpeed = 3.5;
+        if (right) turnSpeed = -3.5;
+
+        // Only allow turning if moving or in the air
+        if (speed > 1 || !isGrounded) {
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
-            
-            if (isGrounded && turnSpeed !== 0) {
-                const flatVel = new THREE.Vector3(vel.x, 0, vel.z);
-                const flatSpeed = flatVel.length();
-                const newVel = forwardDir.clone().multiplyScalar(flatSpeed);
-                rbRef.current.setLinvel({ x: newVel.x, y: vel.y, z: newVel.z }, true);
-            }
         } else {
             rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
         }
@@ -124,10 +133,10 @@ export default function Player() {
         // --- JUMPING ---
         if (jump && !wasJumpPressed.current) {
             if (isGrounded) {
-                rbRef.current.applyImpulse({ x: 0, y: 16, z: 0 }, true);
+                rbRef.current.applyImpulse({ x: 0, y: 12, z: 0 }, true);
                 canDoubleJump.current = true;
             } else if (canDoubleJump.current) {
-                rbRef.current.setLinvel({ x: vel.x, y: Math.max(vel.y, 0) + 12, z: vel.z }, true);
+                rbRef.current.setLinvel({ x: vel.x, y: Math.max(vel.y, 0) + 10, z: vel.z }, true);
                 canDoubleJump.current = false;
 
                 isFlipping.current = true;
@@ -143,15 +152,14 @@ export default function Player() {
 
         // --- VISUALS ---
         if (meshRef.current) {
-            meshRef.current.position.lerp(new THREE.Vector3(0, 0, 0), 8 * delta);
+            // Smoothly recover from the push jolt (both position and pitch rotation)
+            meshRef.current.position.lerp(new THREE.Vector3(0, 0, 0), 10 * delta);
+            meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, 0, 10 * delta);
 
             const targetUp = floorNormal.clone().normalize();
             const targetForward = forwardDir.clone().projectOnPlane(targetUp).normalize();
-            
-            // FIX: The cross product was reversed, generating an invalid, corrupted math matrix.
-            // This is exactly why the skateboard mesh was breaking and refusing to turn visually!
             const targetRight = new THREE.Vector3().crossVectors(targetUp, targetForward).normalize();
-            
+
             const targetMat = new THREE.Matrix4().makeBasis(targetRight, targetUp, targetForward);
             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(targetMat);
 
@@ -178,14 +186,20 @@ export default function Player() {
         }
 
         // --- CAMERA ---
-        const playerPosVec = new THREE.Vector3(pos.x, pos.y, pos.z);
-        const idealOffset = forwardDir.clone().multiplyScalar(-10).add(new THREE.Vector3(0, 6, 0));
-        const idealPosition = playerPosVec.clone().add(idealOffset);
-        const idealTarget = playerPosVec.clone().add(forwardDir.clone().multiplyScalar(15));
+        // Lock the camera tightly at a fixed distance so it never pulls away
+        const cameraDistance = 7;
+        const cameraHeight = 3.5;
 
-        // Using refs for smooth camera lerping ensures it survives React state changes
-        smoothedCameraPosition.current.lerp(idealPosition, 5 * delta);
-        smoothedCameraTarget.current.lerp(idealTarget, 10 * delta);
+        const playerPosVec = new THREE.Vector3(pos.x, pos.y, pos.z);
+        const idealOffset = forwardDir.clone().multiplyScalar(-cameraDistance).add(new THREE.Vector3(0, cameraHeight, 0));
+        const idealPosition = playerPosVec.clone().add(idealOffset);
+
+        // Target specifically ahead of the player to lock the FOV properly
+        const idealTarget = playerPosVec.clone().add(forwardDir.clone().multiplyScalar(5));
+
+        // Massively increased lerp speed to force the camera to stick tightly to the player
+        smoothedCameraPosition.current.lerp(idealPosition, 12 * delta);
+        smoothedCameraTarget.current.lerp(idealTarget, 15 * delta);
 
         state.camera.position.copy(smoothedCameraPosition.current);
         state.camera.lookAt(smoothedCameraTarget.current);
