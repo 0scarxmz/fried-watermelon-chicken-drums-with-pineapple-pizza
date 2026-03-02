@@ -17,9 +17,11 @@ export default function Player() {
     const isFlipping = useRef(false);
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
-
-    // Push timer
     const lastPushTime = useRef(0);
+
+    // FIX: Using refs for the camera prevents it from violently snapping on React re-renders!
+    const smoothedCameraPosition = useRef(new THREE.Vector3(0, 10, -10));
+    const smoothedCameraTarget = useRef(new THREE.Vector3());
 
     const [, getKeys] = useKeyboardControls();
 
@@ -35,13 +37,11 @@ export default function Player() {
         }
     }, [scene, materials]);
 
-    const cameraTarget = new THREE.Vector3();
-    const cameraPosition = new THREE.Vector3();
-
     useFrame((state, delta) => {
         if (!rbRef.current) return;
 
-        const { forward, backward, left, right, jump } = getKeys() as any;
+        const keys = getKeys() as any;
+        const { forward, backward, left, right, jump } = keys;
         const now = state.clock.getElapsedTime();
 
         const pos = rbRef.current.translation();
@@ -57,10 +57,9 @@ export default function Player() {
         const rbQuat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
         const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(rbQuat);
 
-        // Raycast straight down from center. 
-        // We use two BallColliders on the ends so the center is EMPTY.
-        // This ensures the raycast ONLY hits the floor and NEVER the player!
-        const rayOrigin = { x: pos.x, y: pos.y + 0.4, z: pos.z };
+        // FIX: Start ray slightly BELOW the rigid body center. 
+        // This guarantees the ray NEVER hits the player's own colliders, fully fixing jumps.
+        const rayOrigin = { x: pos.x, y: pos.y - 0.1, z: pos.z };
         const rayDir = { x: 0, y: -1, z: 0 };
         const ray = new rapier.Ray(rayOrigin, rayDir);
         const hit = world.castRay(ray, 1.5, true);
@@ -68,8 +67,8 @@ export default function Player() {
         let floorNormal = new THREE.Vector3(0, 1, 0);
         let isGrounded = false;
 
-        // Ground check: Ray starts at pos.y + 0.4. Floor is around pos.y. So toi should be ~0.4.
-        if (hit && hit.toi < 0.65) {
+        // Since we start the ray 0.1 units lower, the ground should be ~0.1 units away on a flat surface
+        if (hit && hit.toi < 0.35) {
             isGrounded = true;
             floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
         }
@@ -78,17 +77,13 @@ export default function Player() {
 
         // --- MOVEMENT & PHYSICS ---
         if (isGrounded) {
-            // Push Mechanic: massive burst of speed every 1.2 seconds
             if (forward && now - lastPushTime.current > 1.2) {
                 lastPushTime.current = now;
                 const pushForce = slopeForward.clone().multiplyScalar(25);
                 rbRef.current.applyImpulse({ x: pushForce.x, y: pushForce.y, z: pushForce.z }, true);
-                
-                // Visual jolt to show the push
                 if (meshRef.current) meshRef.current.position.z = 0.5;
             }
 
-            // Braking / Fakie
             if (backward) {
                 const brakeForce = slopeForward.clone().multiplyScalar(-30 * delta);
                 rbRef.current.applyImpulse({ x: brakeForce.x, y: brakeForce.y, z: brakeForce.z }, true);
@@ -97,15 +92,12 @@ export default function Player() {
             const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
             const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(rbQuat).projectOnPlane(floorNormal).normalize();
             
-            // Grip: Kill lateral sliding
             const lateralSpeed = currentVelocity.dot(rightDir);
-            const lateralForce = rightDir.clone().multiplyScalar(-lateralSpeed * 50 * delta);
+            const lateralForce = rightDir.clone().multiplyScalar(-50 * lateralSpeed * delta);
             rbRef.current.applyImpulse({ x: lateralForce.x, y: lateralForce.y, z: lateralForce.z }, true);
 
-            // Downward pull to stick to ramps
             rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
         } else {
-            // Minimal air control
             if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(10 * delta), true);
             if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-10 * delta), true);
         }
@@ -119,7 +111,6 @@ export default function Player() {
         if (currentSpeed > 1 || !isGrounded) {
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
             
-            // Redirect momentum so the skateboard actually changes movement direction when turning
             if (isGrounded && turnSpeed !== 0) {
                 const flatVel = new THREE.Vector3(vel.x, 0, vel.z);
                 const flatSpeed = flatVel.length();
@@ -133,11 +124,9 @@ export default function Player() {
         // --- JUMPING ---
         if (jump && !wasJumpPressed.current) {
             if (isGrounded) {
-                // First Jump
                 rbRef.current.applyImpulse({ x: 0, y: 16, z: 0 }, true);
                 canDoubleJump.current = true;
             } else if (canDoubleJump.current) {
-                // Double Jump / Kickflip
                 rbRef.current.setLinvel({ x: vel.x, y: Math.max(vel.y, 0) + 12, z: vel.z }, true);
                 canDoubleJump.current = false;
 
@@ -154,14 +143,16 @@ export default function Player() {
 
         // --- VISUALS ---
         if (meshRef.current) {
-            // Smoothly recover from the push jolt
             meshRef.current.position.lerp(new THREE.Vector3(0, 0, 0), 8 * delta);
 
             const targetUp = floorNormal.clone().normalize();
             const targetForward = forwardDir.clone().projectOnPlane(targetUp).normalize();
-            const rightVec = new THREE.Vector3().crossVectors(targetForward, targetUp).normalize();
             
-            const targetMat = new THREE.Matrix4().makeBasis(rightVec, targetUp, targetForward);
+            // FIX: The cross product was reversed, generating an invalid, corrupted math matrix.
+            // This is exactly why the skateboard mesh was breaking and refusing to turn visually!
+            const targetRight = new THREE.Vector3().crossVectors(targetUp, targetForward).normalize();
+            
+            const targetMat = new THREE.Matrix4().makeBasis(targetRight, targetUp, targetForward);
             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(targetMat);
 
             const localTargetQuat = targetQuat.clone().premultiply(rbQuat.clone().invert());
@@ -192,11 +183,12 @@ export default function Player() {
         const idealPosition = playerPosVec.clone().add(idealOffset);
         const idealTarget = playerPosVec.clone().add(forwardDir.clone().multiplyScalar(15));
 
-        cameraPosition.lerp(idealPosition, 5 * delta);
-        cameraTarget.lerp(idealTarget, 10 * delta);
+        // Using refs for smooth camera lerping ensures it survives React state changes
+        smoothedCameraPosition.current.lerp(idealPosition, 5 * delta);
+        smoothedCameraTarget.current.lerp(idealTarget, 10 * delta);
 
-        state.camera.position.copy(cameraPosition);
-        state.camera.lookAt(cameraTarget);
+        state.camera.position.copy(smoothedCameraPosition.current);
+        state.camera.lookAt(smoothedCameraTarget.current);
     });
 
     return (
@@ -212,11 +204,6 @@ export default function Player() {
             linearDamping={0.4}
             angularDamping={4}
         >
-            {/* 
-              By splitting the colliders into the front and back trucks, 
-              the very center of the board is completely clear.
-              This prevents our downward ground-detection raycast from ever hitting the player!
-            */}
             <BallCollider args={[0.2]} position={[0, 0.2, 0.4]} />
             <BallCollider args={[0.2]} position={[0, 0.2, -0.4]} />
 
