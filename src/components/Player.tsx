@@ -18,6 +18,9 @@ export default function Player() {
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
 
+    // Speed tracking for acceleration
+    const currentSpeed = useRef(0);
+
     const smoothedCameraPosition = useRef(new THREE.Vector3(0, 10, -10));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
 
@@ -76,13 +79,16 @@ export default function Player() {
         const speedXZ = horizontalVelocity.length();
 
         // --- ARCADE MOVEMENT ---
-        const moveSpeed = 25; 
+        const startSpeed = 25; 
+        const maxMoveSpeed = 45;
+        const acceleration = 15; // Speed increase per second
         
         if (isGrounded) {
             rbRef.current.setGravityScale(0, true);
 
             if (!forward && !backward) {
                 // HARD STOP. Absolutely zero velocity.
+                currentSpeed.current = 0; // Reset speed
                 rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
                 
                 // Nuke all angular velocity too so we don't spin or drift
@@ -92,9 +98,16 @@ export default function Player() {
                 rbRef.current.resetForces(true);
                 rbRef.current.resetTorques(true);
             } else {
+                if (currentSpeed.current === 0) {
+                    currentSpeed.current = startSpeed;
+                } else {
+                    currentSpeed.current += acceleration * delta;
+                    if (currentSpeed.current > maxMoveSpeed) currentSpeed.current = maxMoveSpeed;
+                }
+
                 let targetSpeed = 0;
-                if (forward) targetSpeed = moveSpeed;
-                if (backward) targetSpeed = -moveSpeed;
+                if (forward) targetSpeed = currentSpeed.current;
+                if (backward) targetSpeed = -currentSpeed.current;
 
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
                 const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
