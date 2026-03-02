@@ -78,13 +78,16 @@ export default function Player() {
 
         // --- REALISTIC SPEED & NO SLIDING ---
         const maxSpeed = 15; // Realistic max speed
-        const pushForce = 15; // Burst of speed per push
+        const pushForce = 6; // Burst of speed per push
         const pushInterval = 0.8; // Seconds between automatic pushes when holding
         const tapCooldown = 0.2; // Minimum time between manual taps
         const braking = 25;
 
+        // Use a mutable velocity vector so we don't accidentally override impulses with anti-slide clamping
+        let desiredVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+
         if (isGrounded) {
-            const dot = currentVelocity.dot(slopeForward);
+            let dot = desiredVelocity.dot(slopeForward);
 
             // --- TAP & HOLD TO PUSH ---
             const timeSinceLastPush = now - lastPushTime.current;
@@ -93,37 +96,46 @@ export default function Player() {
 
             if (isTap || isHold) {
                 if (speed < maxSpeed) {
-                    const accelForce = slopeForward.clone().multiplyScalar(pushForce);
-                    rbRef.current.applyImpulse({ x: accelForce.x, y: accelForce.y, z: accelForce.z }, true);
+                    desiredVelocity.add(slopeForward.clone().multiplyScalar(pushForce));
                     lastPushTime.current = now;
+                    dot = desiredVelocity.dot(slopeForward); // Re-calc dot
                 }
             }
 
             // --- BRAKING ---
             if (backward) {
-                if (dot > 0.2) {
-                    const brakeForce = slopeForward.clone().multiplyScalar(-braking * delta);
-                    rbRef.current.applyImpulse({ x: brakeForce.x, y: brakeForce.y, z: brakeForce.z }, true);
-                } else if (Math.abs(dot) <= 0.2) {
-                    rbRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+                if (dot > 0.5) {
+                    desiredVelocity.sub(slopeForward.clone().multiplyScalar(braking * delta));
+                } else if (dot < -0.5) {
+                    desiredVelocity.add(slopeForward.clone().multiplyScalar(braking * delta));
+                } else {
+                    desiredVelocity.x = 0;
+                    desiredVelocity.z = 0;
                 }
+                dot = desiredVelocity.dot(slopeForward);
             }
 
             // Enforce maximum speed cap smoothly
-            if (speed > maxSpeed) {
-                const dragDirection = currentVelocity.clone().normalize().multiplyScalar(-25 * delta);
-                rbRef.current.applyImpulse({ x: dragDirection.x, y: dragDirection.y, z: dragDirection.z }, true);
+            let newSpeed = desiredVelocity.length();
+            if (newSpeed > maxSpeed) {
+                desiredVelocity.lerp(desiredVelocity.clone().normalize().multiplyScalar(maxSpeed), 5 * delta);
+                newSpeed = desiredVelocity.length();
             }
 
             // --- CANCEL LATERAL SLIDING ENTIRELY ---
-            if (speed > 0.1) {
+            if (newSpeed > 0.1) {
                 const travelDirection = dot >= 0 ? 1 : -1;
-                const newVel = slopeForward.clone().multiplyScalar(speed * travelDirection);
+                const newVel = slopeForward.clone().multiplyScalar(newSpeed * travelDirection);
                 rbRef.current.setLinvel({ x: newVel.x, y: vel.y, z: newVel.z }, true);
+            } else {
+                rbRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
             }
 
             // Downward force to stick to ramps
             rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
+        } else {
+            if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(5 * delta), true);
+            if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
         }
 
         wasForwardPressed.current = forward;
