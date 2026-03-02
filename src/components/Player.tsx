@@ -28,7 +28,7 @@ export default function Player() {
     const cameraPosition = new THREE.Vector3();
 
     // Start from 0: simple movement variables
-    const speed = 4;
+    const speed = 36;
     const turnSpeed = 1.2;
 
     useFrame((state, delta) => {
@@ -84,7 +84,7 @@ export default function Player() {
     return (
         <group ref={playerRef} position={[0, 1, 0]}>
             <group ref={meshRef}>
-                <primitive object={scene} position={[0, -0.4, 0]} rotation={[0, Math.PI, 0]} scale={4.5} />
+                <primitive object={scene} position={[0, -0.4, 0]} rotation={[0, Math.PI, 0]} scale={6.75} />
             </group>
         </group>
     );
