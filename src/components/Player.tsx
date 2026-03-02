@@ -137,13 +137,13 @@ export default function Player() {
         // --- TURNING (DYNAMIC CARVING) ---
         // Steer slower at high speeds, faster at low speeds for smooth carving
         let turnSpeed = 0;
-        const turnMultiplier = isGrounded ? Math.max(1.5, 4.0 - (speed * 0.15)) : 3.0; // Dynamic turn speed based on velocity
+        const turnMultiplier = isGrounded ? Math.max(1.5, 4.0 - (speedXZ * 0.15)) : 3.0; // Dynamic turn speed based on velocity
 
         if (left) turnSpeed = turnMultiplier;
         if (right) turnSpeed = -turnMultiplier;
 
         // Only allow turning if moving or in the air
-        if (speed > 1 || !isGrounded) {
+        if (speedXZ > 1 || !isGrounded) {
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
         } else {
             rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
