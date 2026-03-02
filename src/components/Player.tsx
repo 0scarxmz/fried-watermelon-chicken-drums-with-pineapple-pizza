@@ -74,7 +74,8 @@ export default function Player() {
 
         const slopeForward = forwardDir.clone().projectOnPlane(floorNormal).normalize();
         const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-        const speed = currentVelocity.length();
+        const horizontalVelocity = new THREE.Vector3(vel.x, 0, vel.z);
+        const speedXZ = horizontalVelocity.length();
 
         // --- REALISTIC SPEED & NO SLIDING ---
         const maxSpeed = 15; // Realistic max speed
@@ -83,11 +84,9 @@ export default function Player() {
         const tapCooldown = 0.2; // Minimum time between manual taps
         const braking = 25;
 
-        // Use a mutable velocity vector so we don't accidentally override impulses with anti-slide clamping
-        let desiredVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-
         if (isGrounded) {
-            let dot = desiredVelocity.dot(slopeForward);
+            // How fast are we going exactly along the direction the board is pointing?
+            let forwardSpeed = currentVelocity.dot(slopeForward);
 
             // --- TAP & HOLD TO PUSH ---
             const timeSinceLastPush = now - lastPushTime.current;
@@ -95,41 +94,36 @@ export default function Player() {
             const isHold = forward && wasForwardPressed.current && timeSinceLastPush > pushInterval;
 
             if (isTap || isHold) {
-                if (speed < maxSpeed) {
-                    desiredVelocity.add(slopeForward.clone().multiplyScalar(pushForce));
+                if (forwardSpeed < maxSpeed) {
+                    forwardSpeed += pushForce;
                     lastPushTime.current = now;
-                    dot = desiredVelocity.dot(slopeForward); // Re-calc dot
                 }
             }
 
             // --- BRAKING ---
             if (backward) {
-                if (dot > 0.5) {
-                    desiredVelocity.sub(slopeForward.clone().multiplyScalar(braking * delta));
-                } else if (dot < -0.5) {
-                    desiredVelocity.add(slopeForward.clone().multiplyScalar(braking * delta));
+                if (forwardSpeed > 0.5) {
+                    forwardSpeed -= braking * delta;
+                } else if (forwardSpeed < -0.5) {
+                    forwardSpeed += braking * delta; // Brake while going fakie
                 } else {
-                    desiredVelocity.x = 0;
-                    desiredVelocity.z = 0;
+                    forwardSpeed = 0;
                 }
-                dot = desiredVelocity.dot(slopeForward);
             }
 
             // Enforce maximum speed cap smoothly
-            let newSpeed = desiredVelocity.length();
-            if (newSpeed > maxSpeed) {
-                desiredVelocity.lerp(desiredVelocity.clone().normalize().multiplyScalar(maxSpeed), 5 * delta);
-                newSpeed = desiredVelocity.length();
+            if (forwardSpeed > maxSpeed) {
+                forwardSpeed = THREE.MathUtils.lerp(forwardSpeed, maxSpeed, 5 * delta);
+            } else if (forwardSpeed < -maxSpeed) {
+                forwardSpeed = THREE.MathUtils.lerp(forwardSpeed, -maxSpeed, 5 * delta);
             }
 
-            // --- CANCEL LATERAL SLIDING ENTIRELY ---
-            if (newSpeed > 0.1) {
-                const travelDirection = dot >= 0 ? 1 : -1;
-                const newVel = slopeForward.clone().multiplyScalar(newSpeed * travelDirection);
-                rbRef.current.setLinvel({ x: newVel.x, y: vel.y, z: newVel.z }, true);
-            } else {
-                rbRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
-            }
+            // --- APPLY FORWARD MOMENTUM ---
+            // Re-align the velocity entirely along the slopeForward vector to eliminate sliding
+            const newVel = slopeForward.clone().multiplyScalar(forwardSpeed);
+
+            // Preserve any vertical velocity that isn't pushing into the floor (like bouncing)
+            rbRef.current.setLinvel({ x: newVel.x, y: vel.y < 0 ? newVel.y : vel.y, z: newVel.z }, true);
 
             // Downward force to stick to ramps
             rbRef.current.applyImpulse({ x: -floorNormal.x * 2, y: -floorNormal.y * 2, z: -floorNormal.z * 2 }, true);
