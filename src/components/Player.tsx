@@ -58,20 +58,30 @@ export default function Player() {
         const rbQuat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
         const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(rbQuat);
 
-        const rayOrigin = { x: pos.x, y: pos.y, z: pos.z };
-        const rayDir = { x: 0, y: -1, z: 0 };
-        const ray = new rapier.Ray(rayOrigin, rayDir);
-        const hit = world.castRay(ray, 1.5, true);
-
+        const rayOrigin = { x: pos.x, y: pos.y + 0.1, z: pos.z };
+        
         let floorNormal = new THREE.Vector3(0, 1, 0);
         let isGrounded = false;
+        let minToi = 1.0; // Distance threshold to be considered "grounded"
 
-        // Start ray at center of board, so distance to floor is ~0.4 units. 
-        // 0.6 gives us a generous margin to stay stuck to the ground.
-        if (hit && hit.toi < 0.6) {
-            isGrounded = true;
-            floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
-        }
+        // Helper to shoot a laser in a specific direction to find the floor/ramp
+        const checkRay = (dx: number, dy: number, dz: number) => {
+            const rayDir = new THREE.Vector3(dx, dy, dz).normalize();
+            const ray = new rapier.Ray(rayOrigin, { x: rayDir.x, y: rayDir.y, z: rayDir.z });
+            const hit = world.castRay(ray, 1.5, false);
+            if (hit && hit.toi < minToi) {
+                minToi = hit.toi;
+                floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
+                isGrounded = true;
+            }
+        };
+
+        // Multi-directional ground detection so steep halfpipes don't trick the game into thinking we are falling
+        checkRay(0, -1, 0); // Straight down
+        checkRay(forwardDir.x, -1, forwardDir.z); // Down-forward
+        checkRay(-forwardDir.x, -1, -forwardDir.z); // Down-backward
+        checkRay(forwardDir.x, -0.2, forwardDir.z); // Almost straight forward (for vertical halfpipe walls)
+        checkRay(-forwardDir.x, -0.2, -forwardDir.z); // Almost straight backward
 
         const slopeForward = forwardDir.clone().projectOnPlane(floorNormal).normalize();
         const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
@@ -79,7 +89,7 @@ export default function Player() {
         const speedXZ = horizontalVelocity.length();
 
         // --- ARCADE MOVEMENT (NO SLIDING, NO DRIFTING) ---
-        const moveSpeed = 35; // Flat constant speed, no acceleration over time
+        const moveSpeed = 20; 
         
         if (isGrounded) {
             rbRef.current.setGravityScale(0, true);
@@ -89,9 +99,12 @@ export default function Player() {
                 currentSpeed.current = 0;
                 rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
                 rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
-                rbRef.current.resetForces(true);
-                rbRef.current.resetTorques(true);
+                
+                // Sleep entirely freezes the physics body in the engine. It cannot be moved by gravity, ramps, or collision forces.
+                rbRef.current.sleep();
             } else {
+                rbRef.current.wakeUp();
+                
                 let targetSpeed = 0;
                 if (forward) targetSpeed = moveSpeed;
                 if (backward) targetSpeed = -moveSpeed;
@@ -100,22 +113,31 @@ export default function Player() {
 
                 // Move exactly along the direction you are facing instantly.
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
-                const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
                 
                 // FORCE velocity. Do not let physics engine apply momentum or gravity slides.
                 rbRef.current.setLinvel({ 
-                    x: newVel.x + stickVel.x, 
-                    y: newVel.y + stickVel.y, 
-                    z: newVel.z + stickVel.z 
+                    x: newVel.x, 
+                    y: newVel.y, 
+                    z: newVel.z 
                 }, true);
             }
         } else {
+            rbRef.current.wakeUp();
             // Re-enable gravity when in the air so you can fall/jump
             rbRef.current.setGravityScale(1, true);
             
-            // Minimal air control
-            if (forward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(5 * delta), true);
-            if (backward) rbRef.current.applyImpulse(forwardDir.clone().multiplyScalar(-5 * delta), true);
+            // Fixed air control (no speed increase/impulses)
+            let airSpeed = 0;
+            if (forward) airSpeed = moveSpeed * 0.8;
+            if (backward) airSpeed = -moveSpeed * 0.8;
+            
+            if (airSpeed !== 0) {
+                const airVel = forwardDir.clone().multiplyScalar(airSpeed);
+                rbRef.current.setLinvel({ x: airVel.x, y: vel.y, z: airVel.z }, true);
+            } else {
+                // Instantly kill forward/backward momentum in the air when W is released
+                rbRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+            }
         }
 
         // --- TURNING ---
@@ -125,13 +147,15 @@ export default function Player() {
 
         // Instant, snappy turning with zero residual spin
         if (turnSpeed !== 0 && (forward || backward || !isGrounded)) {
+            rbRef.current.wakeUp();
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
-        } else {
+        } else if (forward || backward || !isGrounded) {
             rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
         }
 
         // --- JUMPING ---
         if (jump && !wasJumpPressed.current) {
+            rbRef.current.wakeUp();
             if (isGrounded) {
                 rbRef.current.applyImpulse({ x: 0, y: 12, z: 0 }, true);
                 canDoubleJump.current = true;
@@ -198,8 +222,9 @@ export default function Player() {
             .add(rightDir.clone().multiplyScalar(rightOffset * 0.5));
 
         // Massively increased lerp speed to force the camera to stick tightly to the player
-        smoothedCameraPosition.current.lerp(idealPosition, 12 * delta);
-        smoothedCameraTarget.current.lerp(idealTarget, 15 * delta);
+        const camSpeed = (forward || backward) ? 12 : 30; // Snaps to you instantly when you stop
+        smoothedCameraPosition.current.lerp(idealPosition, camSpeed * delta);
+        smoothedCameraTarget.current.lerp(idealTarget, 20 * delta);
 
         state.camera.position.copy(smoothedCameraPosition.current);
         state.camera.lookAt(smoothedCameraTarget.current);
