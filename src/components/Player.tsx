@@ -79,16 +79,14 @@ export default function Player() {
         const speedXZ = horizontalVelocity.length();
 
         // --- ARCADE MOVEMENT (NO SLIDING, NO DRIFTING) ---
-        const startSpeed = 25; 
-        const maxMoveSpeed = 40; // Slower max speed
-        const acceleration = 15; // Slower acceleration
+        const moveSpeed = 35; // Flat constant speed, no acceleration over time
         
         if (isGrounded) {
             rbRef.current.setGravityScale(0, true);
 
             if (!forward && !backward) {
-                // NORMAL STOP. Smoothly decelerate to zero instead of instantly freezing.
-                currentSpeed.current = THREE.MathUtils.lerp(currentSpeed.current, 0, 5 * delta);
+                // NORMAL STOP: Smoothly decelerate to zero instead of instantly freezing.
+                currentSpeed.current = THREE.MathUtils.lerp(currentSpeed.current, 0, 8 * delta);
                 
                 if (Math.abs(currentSpeed.current) < 0.5) {
                     currentSpeed.current = 0;
@@ -104,19 +102,13 @@ export default function Player() {
                     }, true);
                 }
             } else {
-                // ACCELERATION
-                if (currentSpeed.current === 0) {
-                    currentSpeed.current = startSpeed;
-                } else {
-                    currentSpeed.current += acceleration * delta;
-                    if (currentSpeed.current > maxMoveSpeed) currentSpeed.current = maxMoveSpeed;
-                }
-
                 let targetSpeed = 0;
-                if (forward) targetSpeed = currentSpeed.current;
-                if (backward) targetSpeed = -currentSpeed.current;
+                if (forward) targetSpeed = moveSpeed;
+                if (backward) targetSpeed = -moveSpeed;
 
-                // Move exactly along the direction you are facing.
+                currentSpeed.current = targetSpeed;
+
+                // Move exactly along the direction you are facing instantly.
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
                 const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
                 
