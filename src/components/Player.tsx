@@ -78,26 +78,21 @@ export default function Player() {
         const horizontalVelocity = new THREE.Vector3(vel.x, 0, vel.z);
         const speedXZ = horizontalVelocity.length();
 
-        // --- ARCADE MOVEMENT ---
+        // --- ARCADE MOVEMENT (NO SLIDING, NO DRIFTING) ---
         const startSpeed = 25; 
-        const maxMoveSpeed = 45;
-        const acceleration = 15; // Speed increase per second
+        const maxMoveSpeed = 40; // Slower max speed
+        const acceleration = 15; // Slower acceleration
         
         if (isGrounded) {
             rbRef.current.setGravityScale(0, true);
 
+            // HARD STOP. Absolutely zero velocity if not holding W or S.
             if (!forward && !backward) {
-                // HARD STOP. Absolutely zero velocity.
-                currentSpeed.current = 0; // Reset speed
+                currentSpeed.current = 0; 
                 rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
-                
-                // Nuke all angular velocity too so we don't spin or drift
                 rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
-                
-                // Instantly kill any residual physical momentum on the RigidBody
-                rbRef.current.resetForces(true);
-                rbRef.current.resetTorques(true);
             } else {
+                // ACCELERATION
                 if (currentSpeed.current === 0) {
                     currentSpeed.current = startSpeed;
                 } else {
@@ -109,9 +104,11 @@ export default function Player() {
                 if (forward) targetSpeed = currentSpeed.current;
                 if (backward) targetSpeed = -currentSpeed.current;
 
+                // Move exactly along the direction you are facing.
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
                 const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
                 
+                // FORCE velocity. Do not let physics engine apply momentum or gravity slides.
                 rbRef.current.setLinvel({ 
                     x: newVel.x + stickVel.x, 
                     y: newVel.y + stickVel.y, 
@@ -186,16 +183,25 @@ export default function Player() {
         }
 
         // --- CAMERA ---
-        // Lock the camera tightly at a fixed distance so it never pulls away
-        const cameraDistance = 7;
-        const cameraHeight = 3.5;
+        // Fortnite style POV: Higher up, slightly to the right shoulder, looking forward and slightly down
+        const cameraDistance = 8.5;
+        const cameraHeight = 5.5;
+        const rightOffset = 1.5;
 
         const playerPosVec = new THREE.Vector3(pos.x, pos.y, pos.z);
-        const idealOffset = forwardDir.clone().multiplyScalar(-cameraDistance).add(new THREE.Vector3(0, cameraHeight, 0));
+        const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(rbQuat);
+
+        const idealOffset = forwardDir.clone().multiplyScalar(-cameraDistance)
+            .add(new THREE.Vector3(0, cameraHeight, 0))
+            .add(rightDir.clone().multiplyScalar(rightOffset));
+            
         const idealPosition = playerPosVec.clone().add(idealOffset);
 
-        // Target specifically ahead of the player to lock the FOV properly
-        const idealTarget = playerPosVec.clone().add(forwardDir.clone().multiplyScalar(5));
+        // Target ahead and slightly above the player's root
+        const idealTarget = playerPosVec.clone()
+            .add(forwardDir.clone().multiplyScalar(12))
+            .add(new THREE.Vector3(0, 2.0, 0))
+            .add(rightDir.clone().multiplyScalar(rightOffset * 0.5));
 
         // Massively increased lerp speed to force the camera to stick tightly to the player
         smoothedCameraPosition.current.lerp(idealPosition, 12 * delta);
@@ -215,7 +221,7 @@ export default function Player() {
             friction={0}
             restitution={0}
             enabledRotations={[false, true, false]}
-            linearDamping={10.0} // MASSIVE linear drag to prevent floating
+            linearDamping={0} 
             angularDamping={10.0} // MASSIVE angular drag to prevent spinning
         >
             <BallCollider args={[0.2]} position={[0, 0.2, 0.4]} />
