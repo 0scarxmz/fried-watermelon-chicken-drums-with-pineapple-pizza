@@ -86,11 +86,23 @@ export default function Player() {
         if (isGrounded) {
             rbRef.current.setGravityScale(0, true);
 
-            // HARD STOP. Absolutely zero velocity if not holding W or S.
             if (!forward && !backward) {
-                currentSpeed.current = 0; 
-                rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
-                rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+                // NORMAL STOP. Smoothly decelerate to zero instead of instantly freezing.
+                currentSpeed.current = THREE.MathUtils.lerp(currentSpeed.current, 0, 5 * delta);
+                
+                if (Math.abs(currentSpeed.current) < 0.5) {
+                    currentSpeed.current = 0;
+                    rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+                    rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+                } else {
+                    const newVel = slopeForward.clone().multiplyScalar(currentSpeed.current);
+                    const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
+                    rbRef.current.setLinvel({ 
+                        x: newVel.x + stickVel.x, 
+                        y: newVel.y + stickVel.y, 
+                        z: newVel.z + stickVel.z 
+                    }, true);
+                }
             } else {
                 // ACCELERATION
                 if (currentSpeed.current === 0) {
