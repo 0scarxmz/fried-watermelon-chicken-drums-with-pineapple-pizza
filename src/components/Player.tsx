@@ -13,10 +13,10 @@ export default function Player() {
 
     const { rapier, world } = useRapier();
 
-    const canDoubleJump = useRef(false);
     const isFlipping = useRef(false);
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
+    const lastJumpTime = useRef(-1); // Tracks when the last jump tap happened (for double-tap detection)
 
     // Speed tracking for acceleration
     const currentSpeed = useRef(0);
@@ -61,10 +61,10 @@ export default function Player() {
         const rayOrigin = { x: pos.x, y: pos.y + 0.1, z: pos.z };
         const rayDir = { x: 0, y: -1, z: 0 };
         const ray = new rapier.Ray(rayOrigin, rayDir);
-        
+
         let floorNormal = new THREE.Vector3(0, 1, 0);
         let isGrounded = false;
-        
+
         // solid=false ensures the raycast completely ignores the inside of the player's own colliders
         const hit = world.castRay(ray, 1.5, false);
 
@@ -79,8 +79,8 @@ export default function Player() {
         const speedXZ = horizontalVelocity.length();
 
         // --- ARCADE MOVEMENT (NO SLIDING, NO DRIFTING) ---
-        const moveSpeed = 20; 
-        
+        const moveSpeed = 20;
+
         if (isGrounded) {
             rbRef.current.setGravityScale(0, true);
 
@@ -89,12 +89,12 @@ export default function Player() {
                 currentSpeed.current = 0;
                 rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
                 rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
-                
+
                 // Sleep entirely freezes the physics body in the engine. It cannot be moved by gravity, ramps, or collision forces.
                 rbRef.current.sleep();
             } else {
                 rbRef.current.wakeUp();
-                
+
                 let targetSpeed = 0;
                 if (forward) targetSpeed = moveSpeed;
                 if (backward) targetSpeed = -moveSpeed;
@@ -103,24 +103,24 @@ export default function Player() {
 
                 // Move exactly along the direction you are facing instantly.
                 const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
-                
+
                 // FORCE velocity. Do not let physics engine apply momentum or gravity slides.
-                rbRef.current.setLinvel({ 
-                    x: newVel.x, 
-                    y: newVel.y, 
-                    z: newVel.z 
+                rbRef.current.setLinvel({
+                    x: newVel.x,
+                    y: newVel.y,
+                    z: newVel.z
                 }, true);
             }
         } else {
             rbRef.current.wakeUp();
             // Re-enable gravity when in the air so you can fall/jump
             rbRef.current.setGravityScale(1, true);
-            
+
             // Fixed air control (no speed increase/impulses)
             let airSpeed = 0;
             if (forward) airSpeed = moveSpeed * 0.8;
             if (backward) airSpeed = -moveSpeed * 0.8;
-            
+
             if (airSpeed !== 0) {
                 const airVel = forwardDir.clone().multiplyScalar(airSpeed);
                 rbRef.current.setLinvel({ x: airVel.x, y: vel.y, z: airVel.z }, true);
@@ -143,22 +143,30 @@ export default function Player() {
             rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
         }
 
-        // --- JUMPING ---
+        // --- JUMP & TRICK (double-tap Space) ---
         if (jump && !wasJumpPressed.current) {
             rbRef.current.wakeUp();
-            if (isGrounded) {
-                rbRef.current.applyImpulse({ x: 0, y: 12, z: 0 }, true);
-                canDoubleJump.current = true;
-            } else if (canDoubleJump.current) {
-                rbRef.current.setLinvel({ x: vel.x, y: Math.max(vel.y, 0) + 10, z: vel.z }, true);
-                canDoubleJump.current = false;
 
-                isFlipping.current = true;
-                flipAngle.current = 0;
+            const timeSinceLastJump = now - lastJumpTime.current;
+            const isDoubleTap = timeSinceLastJump < 0.4; // Within 0.4 seconds = double-tap
+
+            if (isGrounded) {
+                if (isDoubleTap) {
+                    // DOUBLE TAP: Ollie + kickflip trick
+                    rbRef.current.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
+                    rbRef.current.applyImpulse({ x: 0, y: 15, z: 0 }, true); // Higher ollie for trick
+                    isFlipping.current = true;
+                    flipAngle.current = 0;
+                } else {
+                    // SINGLE TAP: Normal ollie
+                    rbRef.current.applyImpulse({ x: 0, y: 11, z: 0 }, true);
+                }
+                lastJumpTime.current = now;
             }
         }
         wasJumpPressed.current = jump;
 
+        // Reset trick when landing
         if (isGrounded && isFlipping.current) {
             isFlipping.current = false;
             flipAngle.current = 0;
@@ -191,28 +199,23 @@ export default function Player() {
         }
 
         // --- CAMERA ---
-        // Fortnite style POV: Higher up, slightly to the right shoulder, looking forward and slightly down
-        const cameraDistance = 8.5;
-        const cameraHeight = 5.5;
-        const rightOffset = 1.5;
+        // Skate 4-style: elevated behind the board, angled down so you see the top and front
+        const cameraDistance = 7;
+        const cameraHeight = 5;
 
         const playerPosVec = new THREE.Vector3(pos.x, pos.y, pos.z);
-        const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(rbQuat);
 
         const idealOffset = forwardDir.clone().multiplyScalar(-cameraDistance)
-            .add(new THREE.Vector3(0, cameraHeight, 0))
-            .add(rightDir.clone().multiplyScalar(rightOffset));
-            
+            .add(new THREE.Vector3(0, cameraHeight, 0));
+
         const idealPosition = playerPosVec.clone().add(idealOffset);
 
-        // Target ahead and slightly above the player's root
+        // Look slightly ahead of the board + slightly elevated so camera angles down naturally
         const idealTarget = playerPosVec.clone()
-            .add(forwardDir.clone().multiplyScalar(12))
-            .add(new THREE.Vector3(0, 2.0, 0))
-            .add(rightDir.clone().multiplyScalar(rightOffset * 0.5));
+            .add(forwardDir.clone().multiplyScalar(2))
+            .add(new THREE.Vector3(0, 0.5, 0));
 
-        // Massively increased lerp speed to force the camera to stick tightly to the player
-        const camSpeed = (forward || backward) ? 12 : 30; // Snaps to you instantly when you stop
+        const camSpeed = (forward || backward) ? 12 : 30;
         smoothedCameraPosition.current.lerp(idealPosition, camSpeed * delta);
         smoothedCameraTarget.current.lerp(idealTarget, 20 * delta);
 
@@ -230,7 +233,7 @@ export default function Player() {
             friction={0}
             restitution={0}
             enabledRotations={[false, true, false]}
-            linearDamping={0} 
+            linearDamping={0}
             angularDamping={10.0} // MASSIVE angular drag to prevent spinning
         >
             <BallCollider args={[0.2]} position={[0, 0.2, 0.4]} />
