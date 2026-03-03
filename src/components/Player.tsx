@@ -85,22 +85,12 @@ export default function Player() {
             rbRef.current.setGravityScale(0, true);
 
             if (!forward && !backward) {
-                // NORMAL STOP: Smoothly decelerate to zero instead of instantly freezing.
-                currentSpeed.current = THREE.MathUtils.lerp(currentSpeed.current, 0, 8 * delta);
-                
-                if (Math.abs(currentSpeed.current) < 0.5) {
-                    currentSpeed.current = 0;
-                    rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
-                    rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
-                } else {
-                    const newVel = slopeForward.clone().multiplyScalar(currentSpeed.current);
-                    const stickVel = floorNormal.clone().multiplyScalar(-2.0); 
-                    rbRef.current.setLinvel({ 
-                        x: newVel.x + stickVel.x, 
-                        y: newVel.y + stickVel.y, 
-                        z: newVel.z + stickVel.z 
-                    }, true);
-                }
+                // HARD INSTANT STOP: Zero sliding, zero drifting
+                currentSpeed.current = 0;
+                rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+                rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+                rbRef.current.resetForces(true);
+                rbRef.current.resetTorques(true);
             } else {
                 let targetSpeed = 0;
                 if (forward) targetSpeed = moveSpeed;
@@ -133,8 +123,8 @@ export default function Player() {
         if (left) turnSpeed = 3.5;
         if (right) turnSpeed = -3.5;
 
-        // Instant, snappy turning.
-        if (turnSpeed !== 0) {
+        // Instant, snappy turning with zero residual spin
+        if (turnSpeed !== 0 && (forward || backward || !isGrounded)) {
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
         } else {
             rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
