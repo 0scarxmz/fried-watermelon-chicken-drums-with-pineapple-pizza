@@ -59,29 +59,19 @@ export default function Player() {
         const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(rbQuat);
 
         const rayOrigin = { x: pos.x, y: pos.y + 0.1, z: pos.z };
+        const rayDir = { x: 0, y: -1, z: 0 };
+        const ray = new rapier.Ray(rayOrigin, rayDir);
         
         let floorNormal = new THREE.Vector3(0, 1, 0);
         let isGrounded = false;
-        let minToi = 1.0; // Distance threshold to be considered "grounded"
+        
+        // solid=false ensures the raycast completely ignores the inside of the player's own colliders
+        const hit = world.castRay(ray, 1.5, false);
 
-        // Helper to shoot a laser in a specific direction to find the floor/ramp
-        const checkRay = (dx: number, dy: number, dz: number) => {
-            const rayDir = new THREE.Vector3(dx, dy, dz).normalize();
-            const ray = new rapier.Ray(rayOrigin, { x: rayDir.x, y: rayDir.y, z: rayDir.z });
-            const hit = world.castRay(ray, 1.5, false);
-            if (hit && hit.toi < minToi) {
-                minToi = hit.toi;
-                floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
-                isGrounded = true;
-            }
-        };
-
-        // Multi-directional ground detection so steep halfpipes don't trick the game into thinking we are falling
-        checkRay(0, -1, 0); // Straight down
-        checkRay(forwardDir.x, -1, forwardDir.z); // Down-forward
-        checkRay(-forwardDir.x, -1, -forwardDir.z); // Down-backward
-        checkRay(forwardDir.x, -0.2, forwardDir.z); // Almost straight forward (for vertical halfpipe walls)
-        checkRay(-forwardDir.x, -0.2, -forwardDir.z); // Almost straight backward
+        if (hit && hit.toi < 0.8) {
+            isGrounded = true;
+            floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
+        }
 
         const slopeForward = forwardDir.clone().projectOnPlane(floorNormal).normalize();
         const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
@@ -248,7 +238,7 @@ export default function Player() {
 
             <group ref={meshRef} position={[0, 0, 0]}>
                 <group ref={flipRef}>
-                    <primitive object={scene} position={[0, -0.2, 0]} rotation={[0, Math.PI, 0]} scale={6.75} />
+                    <primitive object={scene} position={[0, -0.2, 0]} rotation={[0, 0, 0]} scale={6.75} />
                 </group>
             </group>
         </RigidBody>
