@@ -16,10 +16,13 @@ export default function Player() {
     const isFlipping = useRef(false);
     const flipAngle = useRef(0);
     const wasJumpPressed = useRef(false);
-    const lastJumpTime = useRef(-1); // Tracks when the last jump tap happened (for double-tap detection)
+    const lastJumpTime = useRef(-1);
 
-    // Speed tracking for acceleration
-    const currentSpeed = useRef(0);
+    // Ground tracking via collision events
+    const groundContactCount = useRef(0);
+
+    // Real-world speed tracking (in m/s, 1 m/s = 3.6 km/h)
+    const currentSpeedMs = useRef(0);
 
     const smoothedCameraPosition = useRef(new THREE.Vector3(0, 10, -10));
     const smoothedCameraTarget = useRef(new THREE.Vector3());
@@ -52,82 +55,75 @@ export default function Player() {
         if (pos.y < -15) {
             rbRef.current.setTranslation({ x: 0, y: 5, z: 0 }, true);
             rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            currentSpeedMs.current = 0;
+            groundContactCount.current = 0;
             return;
         }
 
         const rbQuat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
         const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(rbQuat);
 
-        const rayOrigin = { x: pos.x, y: pos.y + 0.1, z: pos.z };
-        const rayDir = { x: 0, y: -1, z: 0 };
-        const ray = new rapier.Ray(rayOrigin, rayDir);
+        // --- GROUND DETECTION using velocity + position ---
+        // The floor top surface is at y=0. Ball colliders at pos.y+0.2 with radius 0.2
+        // means the board sits at pos.y ≈ 0 when on the ground.
+        // Also check vertical velocity is near zero (not moving up fast = not just jumped)
+        const isGrounded = pos.y < 0.5 && vel.y > -3;
 
         let floorNormal = new THREE.Vector3(0, 1, 0);
-        let isGrounded = false;
 
-        // solid=false ensures the raycast completely ignores the inside of the player's own colliders
-        const hit = world.castRay(ray, 1.5, false);
-
-        if (hit && hit.toi < 0.8) {
-            isGrounded = true;
-            floorNormal.set(hit.normal.x, hit.normal.y, hit.normal.z);
+        // Optionally refine floor normal using a ray (but fallback if miss)
+        try {
+            const rayOrigin = { x: pos.x, y: pos.y + 0.3, z: pos.z };
+            const ray = new rapier.Ray(rayOrigin, { x: 0, y: -1, z: 0 });
+            const hit = world.castRay(ray, 2.0, false);
+            if (hit && hit.toi < 1.5) {
+                const n = hit.normal;
+                if (n && Math.abs(n.y) > 0.3) {
+                    floorNormal.set(n.x, n.y, n.z);
+                }
+            }
+        } catch (_) {
+            // If castRay fails, keep default up normal
         }
 
         const slopeForward = forwardDir.clone().projectOnPlane(floorNormal).normalize();
-        const currentVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
-        const horizontalVelocity = new THREE.Vector3(vel.x, 0, vel.z);
-        const speedXZ = horizontalVelocity.length();
 
-        // --- ARCADE MOVEMENT (NO SLIDING, NO DRIFTING) ---
-        const moveSpeed = 20;
+        // --- REALISTIC SKATEBOARD SPEED (km/h) ---
+        // 1 Rapier unit = 1 m, so 1 m/s = 3.6 km/h
+        const maxSpeedMs = 28 / 3.6;    // 28 km/h top speed
+        const accelMs = 5.0;             // m/s² while holding W
+        const decelMs = 12;              // m/s² when releasing W
+        const brakeMs = 22;              // m/s² when pressing S
 
         if (isGrounded) {
+            rbRef.current.wakeUp();
             rbRef.current.setGravityScale(0, true);
 
-            if (!forward && !backward) {
-                // HARD INSTANT STOP: Zero sliding, zero drifting
-                currentSpeed.current = 0;
-                rbRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
-                rbRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
-
-                // Sleep entirely freezes the physics body in the engine. It cannot be moved by gravity, ramps, or collision forces.
-                rbRef.current.sleep();
+            if (forward) {
+                currentSpeedMs.current = Math.min(maxSpeedMs, currentSpeedMs.current + accelMs * delta);
+            } else if (backward) {
+                if (currentSpeedMs.current > 0) {
+                    currentSpeedMs.current = Math.max(0, currentSpeedMs.current - brakeMs * delta);
+                } else {
+                    currentSpeedMs.current = Math.max(-maxSpeedMs * 0.4, currentSpeedMs.current - (brakeMs * 0.4) * delta);
+                }
             } else {
-                rbRef.current.wakeUp();
-
-                let targetSpeed = 0;
-                if (forward) targetSpeed = moveSpeed;
-                if (backward) targetSpeed = -moveSpeed;
-
-                currentSpeed.current = targetSpeed;
-
-                // Move exactly along the direction you are facing instantly.
-                const newVel = slopeForward.clone().multiplyScalar(targetSpeed);
-
-                // FORCE velocity. Do not let physics engine apply momentum or gravity slides.
-                rbRef.current.setLinvel({
-                    x: newVel.x,
-                    y: newVel.y,
-                    z: newVel.z
-                }, true);
+                if (currentSpeedMs.current > 0) {
+                    currentSpeedMs.current = Math.max(0, currentSpeedMs.current - decelMs * delta);
+                } else if (currentSpeedMs.current < 0) {
+                    currentSpeedMs.current = Math.min(0, currentSpeedMs.current + decelMs * delta);
+                }
             }
+
+            const newVel = slopeForward.clone().multiplyScalar(currentSpeedMs.current);
+            rbRef.current.setLinvel({ x: newVel.x, y: newVel.y, z: newVel.z }, true);
+
         } else {
             rbRef.current.wakeUp();
-            // Re-enable gravity when in the air so you can fall/jump
             rbRef.current.setGravityScale(1, true);
-
-            // Fixed air control (no speed increase/impulses)
-            let airSpeed = 0;
-            if (forward) airSpeed = moveSpeed * 0.8;
-            if (backward) airSpeed = -moveSpeed * 0.8;
-
-            if (airSpeed !== 0) {
-                const airVel = forwardDir.clone().multiplyScalar(airSpeed);
-                rbRef.current.setLinvel({ x: airVel.x, y: vel.y, z: airVel.z }, true);
-            } else {
-                // Instantly kill forward/backward momentum in the air when W is released
-                rbRef.current.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
-            }
+            // Carry forward speed through air
+            const airVel = forwardDir.clone().multiplyScalar(currentSpeedMs.current);
+            rbRef.current.setLinvel({ x: airVel.x, y: vel.y, z: airVel.z }, true);
         }
 
         // --- TURNING ---
@@ -135,7 +131,6 @@ export default function Player() {
         if (left) turnSpeed = 3.5;
         if (right) turnSpeed = -3.5;
 
-        // Instant, snappy turning with zero residual spin
         if (turnSpeed !== 0 && (forward || backward || !isGrounded)) {
             rbRef.current.wakeUp();
             rbRef.current.setAngvel({ x: 0, y: turnSpeed, z: 0 }, true);
@@ -148,17 +143,16 @@ export default function Player() {
             rbRef.current.wakeUp();
 
             const timeSinceLastJump = now - lastJumpTime.current;
-            const isDoubleTap = timeSinceLastJump < 0.4; // Within 0.4 seconds = double-tap
+            const isDoubleTap = timeSinceLastJump < 0.4;
 
             if (isGrounded) {
+                rbRef.current.setGravityScale(1, true);
                 if (isDoubleTap) {
-                    // DOUBLE TAP: Ollie + kickflip trick
                     rbRef.current.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
-                    rbRef.current.applyImpulse({ x: 0, y: 15, z: 0 }, true); // Higher ollie for trick
+                    rbRef.current.applyImpulse({ x: 0, y: 15, z: 0 }, true);
                     isFlipping.current = true;
                     flipAngle.current = 0;
                 } else {
-                    // SINGLE TAP: Normal ollie
                     rbRef.current.applyImpulse({ x: 0, y: 11, z: 0 }, true);
                 }
                 lastJumpTime.current = now;
@@ -166,7 +160,6 @@ export default function Player() {
         }
         wasJumpPressed.current = jump;
 
-        // Reset trick when landing
         if (isGrounded && isFlipping.current) {
             isFlipping.current = false;
             flipAngle.current = 0;
@@ -180,10 +173,8 @@ export default function Player() {
 
             const targetMat = new THREE.Matrix4().makeBasis(targetRight, targetUp, targetForward);
             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(targetMat);
-
             const localTargetQuat = targetQuat.clone().premultiply(rbQuat.clone().invert());
 
-            // I REMOVED the sideways lean drifting animation entirely as requested
             meshRef.current.quaternion.slerp(localTargetQuat, 15 * delta);
         }
 
@@ -198,19 +189,14 @@ export default function Player() {
             flipRef.current.rotation.z = flipAngle.current;
         }
 
-        // --- CAMERA ---
-        // Skate 4-style: elevated behind the board, angled down so you see the top and front
+        // --- CAMERA (Skate 4 style) ---
         const cameraDistance = 7;
-        const cameraHeight = 5;
+        const cameraHeight = 7;
 
         const playerPosVec = new THREE.Vector3(pos.x, pos.y, pos.z);
-
         const idealOffset = forwardDir.clone().multiplyScalar(-cameraDistance)
             .add(new THREE.Vector3(0, cameraHeight, 0));
-
         const idealPosition = playerPosVec.clone().add(idealOffset);
-
-        // Look slightly ahead of the board + slightly elevated so camera angles down naturally
         const idealTarget = playerPosVec.clone()
             .add(forwardDir.clone().multiplyScalar(2))
             .add(new THREE.Vector3(0, 0.5, 0));
@@ -234,7 +220,7 @@ export default function Player() {
             restitution={0}
             enabledRotations={[false, true, false]}
             linearDamping={0}
-            angularDamping={10.0} // MASSIVE angular drag to prevent spinning
+            angularDamping={10.0}
         >
             <BallCollider args={[0.2]} position={[0, 0.2, 0.4]} />
             <BallCollider args={[0.2]} position={[0, 0.2, -0.4]} />
